@@ -714,6 +714,71 @@ mod tests {
     use super::*;
     use crate::geometry::AbsoluteAxis;
     use crate::style_helpers::TaffyAuto;
+    use crate::sys::DefaultCheapStr;
+    use crate::tree::{Layout, LayoutOutput, TraversePartialTree};
+    use crate::Style;
+
+    struct TestTree {
+        style: Style,
+    }
+
+    impl TraversePartialTree for TestTree {
+        type ChildIter<'a> = core::iter::Empty<NodeId>;
+
+        fn child_ids(&self, _parent_node_id: NodeId) -> Self::ChildIter<'_> {
+            core::iter::empty()
+        }
+
+        fn child_count(&self, _parent_node_id: NodeId) -> usize {
+            0
+        }
+
+        fn get_child_id(&self, _parent_node_id: NodeId, _child_index: usize) -> NodeId {
+            panic!("test tree has no children")
+        }
+    }
+
+    impl LayoutPartialTree for TestTree {
+        type CoreContainerStyle<'a> = &'a Style;
+        type CustomIdent = DefaultCheapStr;
+
+        fn get_core_container_style(&self, _node_id: NodeId) -> Self::CoreContainerStyle<'_> {
+            &self.style
+        }
+
+        fn set_unrounded_layout(&mut self, _node_id: NodeId, _layout: &Layout) {}
+
+        fn compute_child_layout(&mut self, _node_id: NodeId, _inputs: LayoutInput) -> LayoutOutput {
+            LayoutOutput::from_outer_size(Size::ZERO)
+        }
+    }
+
+    #[test]
+    fn definite_area_margins_resolve_all_physical_edges() {
+        let tree = TestTree { style: Style::default() };
+        let margin = LengthPercentageAuto::percent(0.1);
+        let item = GridItem::new_with_placement_style_and_order(
+            NodeId::new(0),
+            Line { start: OriginZeroLine(0), end: OriginZeroLine(1) },
+            Line { start: OriginZeroLine(0), end: OriginZeroLine(1) },
+            Style::<DefaultCheapStr> {
+                margin: Rect { left: margin, right: margin, top: margin, bottom: margin },
+                ..Default::default()
+            },
+            AlignItems::STRETCH,
+            AlignItems::STRETCH,
+            0,
+        );
+
+        let sums = item.margins_axis_sums_with_baseline_shims(
+            Size { width: Some(100.0), height: Some(60.0) },
+            AbsoluteAxis::Horizontal,
+            AbstractAxis::Inline,
+            &tree,
+        );
+
+        assert_eq!(sums, Size { width: 20.0, height: 20.0 });
+    }
 
     #[test]
     fn cyclic_preferred_size_basis_is_axis_correct() {
