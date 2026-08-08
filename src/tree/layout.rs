@@ -27,6 +27,41 @@ pub enum SizingMode {
     InherentSize,
 }
 
+/// The inline-axis basis used to resolve percentages while measuring a node
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub enum InlinePercentageBasis {
+    /// Resolve percentages against the parent's width
+    ParentWidth,
+    /// Resolve percentages against an explicit inline-axis size
+    Explicit(Option<f32>),
+}
+
+impl InlinePercentageBasis {
+    /// Resolve this basis to a concrete value
+    #[inline(always)]
+    pub fn resolve(self, parent_size: Size<Option<f32>>) -> Option<f32> {
+        match self {
+            Self::ParentWidth => parent_size.width,
+            Self::Explicit(value) => value,
+        }
+    }
+}
+
+/// The inputs passed to a leaf-node measure function
+#[derive(Debug, Copy, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize))]
+pub struct MeasureInput {
+    /// Dimensions which should be taken as fixed when measuring the node
+    pub known_dimensions: Size<Option<f32>>,
+    /// The size of the node's containing block
+    pub parent_size: Size<Option<f32>>,
+    /// The inline-axis basis used to resolve percentages
+    pub inline_percentage_basis: InlinePercentageBasis,
+    /// The space available to the node
+    pub available_space: Size<AvailableSpace>,
+}
+
 /// A set of margins that are available for collapsing with for block layout's margin collapsing
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
@@ -128,6 +163,8 @@ pub struct LayoutInput {
     pub known_dimensions: Size<Option<f32>>,
     /// Parent size dimensions are intended to be used for percentage resolution.
     pub parent_size: Size<Option<f32>>,
+    /// The inline-axis basis used to resolve percentages while measuring the node.
+    pub inline_percentage_basis: InlinePercentageBasis,
     /// Available space represents an amount of space to layout into, and is used as a soft constraint
     /// for the purpose of wrapping.
     pub available_space: Size<AvailableSpace>,
@@ -143,6 +180,7 @@ impl LayoutInput {
         // The rest will be ignored
         known_dimensions: Size::NONE,
         parent_size: Size::NONE,
+        inline_percentage_basis: InlinePercentageBasis::ParentWidth,
         available_space: Size::MAX_CONTENT,
         sizing_mode: SizingMode::InherentSize,
         axis: RequestedAxis::Both,

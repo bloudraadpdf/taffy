@@ -11,8 +11,8 @@ use crate::geometry::Size;
 use crate::style::{AvailableSpace, Display, Style};
 use crate::sys::DefaultCheapStr;
 use crate::tree::{
-    Cache, ClearState, Layout, LayoutInput, LayoutOutput, LayoutPartialTree, NodeId, PrintTree, RoundTree, RunMode,
-    TraversePartialTree, TraverseTree,
+    Cache, ClearState, Layout, LayoutInput, LayoutOutput, LayoutPartialTree, MeasureInput, NodeId, PrintTree,
+    RoundTree, RunMode, TraversePartialTree, TraverseTree,
 };
 use crate::util::debug::{debug_log, debug_log_node};
 use crate::util::sys::{new_vec_with_capacity, ChildrenVec, Vec};
@@ -21,6 +21,10 @@ use crate::compute::{
     compute_cached_layout, compute_hidden_layout, compute_leaf_layout, compute_root_layout, round_layout,
 };
 use crate::CacheTree;
+
+fn zero_calc_value(_value: *const (), _basis: f32) -> f32 {
+    0.0
+}
 
 #[cfg(feature = "block_layout")]
 use crate::{compute::compute_block_layout, LayoutBlockContainer};
@@ -266,19 +270,19 @@ impl<NodeContext> PrintTree for TaffyTree<NodeContext> {
 /// which makes the lifetimes of the context much more flexible.
 pub(crate) struct TaffyView<'t, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     /// A reference to the TaffyTree
     pub(crate) taffy: &'t mut TaffyTree<NodeContext>,
     /// The context provided for passing to measure functions if layout is run over this struct
     pub(crate) measure_function: MeasureFunction,
+    /// The function used to resolve opaque calc values
+    pub(crate) calc_function: &'t dyn Fn(*const (), f32) -> f32,
 }
 
 impl<NodeContext, MeasureFunction> TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     #[inline(always)]
     /// Unified implementation that both `LayoutPartialTree::compute_child_layout`
@@ -325,9 +329,24 @@ where
                     let has_context = tree.taffy.nodes[node_key].has_context;
                     let node_context = has_context.then(|| tree.taffy.node_context_data.get_mut(node_key)).flatten();
                     let measure_function = |known_dimensions, available_space| {
-                        (tree.measure_function)(known_dimensions, available_space, node_id, node_context, style)
+                        (tree.measure_function)(
+                            MeasureInput {
+                                known_dimensions,
+                                parent_size: inputs.parent_size,
+                                inline_percentage_basis: inputs.inline_percentage_basis,
+                                available_space,
+                            },
+                            node_id,
+                            node_context,
+                            style,
+                        )
                     };
-                    compute_leaf_layout(inputs, style, |_, _| 0.0, measure_function)
+                    compute_leaf_layout(
+                        inputs,
+                        style,
+                        |value, basis| (tree.calc_function)(value, basis),
+                        measure_function,
+                    )
                 }
             }
         })
@@ -337,8 +356,7 @@ where
 // TraversePartialTree impl for TaffyView
 impl<NodeContext, MeasureFunction> TraversePartialTree for TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     type ChildIter<'a>
         = TaffyTreeChildIter<'a>
@@ -363,16 +381,14 @@ where
 
 // TraverseTree impl for TaffyView
 impl<NodeContext, MeasureFunction> TraverseTree for TaffyView<'_, NodeContext, MeasureFunction> where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>
 {
 }
 
 // LayoutPartialTree impl for TaffyView
 impl<NodeContext, MeasureFunction> LayoutPartialTree for TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     type CoreContainerStyle<'a>
         = &'a Style
@@ -392,8 +408,8 @@ where
     }
 
     #[inline(always)]
-    fn resolve_calc_value(&self, _val: *const (), _basis: f32) -> f32 {
-        0.0
+    fn resolve_calc_value(&self, value: *const (), basis: f32) -> f32 {
+        (self.calc_function)(value, basis)
     }
 
     #[inline(always)]
@@ -409,8 +425,7 @@ where
 
 impl<NodeContext, MeasureFunction> CacheTree for TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     fn cache_get(&self, node_id: NodeId, input: &LayoutInput) -> Option<LayoutOutput> {
         self.taffy.nodes[node_id.into()].cache.get(input)
@@ -428,8 +443,7 @@ where
 #[cfg(feature = "block_layout")]
 impl<NodeContext, MeasureFunction> LayoutBlockContainer for TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     type BlockContainerStyle<'a>
         = &'a Style
@@ -464,8 +478,7 @@ where
 #[cfg(feature = "flexbox")]
 impl<NodeContext, MeasureFunction> LayoutFlexboxContainer for TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     type FlexboxContainerStyle<'a>
         = &'a Style
@@ -490,8 +503,7 @@ where
 #[cfg(feature = "grid")]
 impl<NodeContext, MeasureFunction> LayoutGridContainer for TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     type GridContainerStyle<'a>
         = &'a Style
@@ -522,8 +534,7 @@ where
 // RoundTree impl for TaffyView
 impl<NodeContext, MeasureFunction> RoundTree for TaffyView<'_, NodeContext, MeasureFunction>
 where
-    MeasureFunction:
-        FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+    MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
 {
     #[inline(always)]
     fn get_unrounded_layout(&self, node: NodeId) -> Layout {
@@ -910,14 +921,36 @@ impl<NodeContext> TaffyTree<NodeContext> {
         &mut self,
         node_id: NodeId,
         available_space: Size<AvailableSpace>,
-        measure_function: MeasureFunction,
+        mut measure_function: MeasureFunction,
     ) -> Result<(), TaffyError>
     where
         MeasureFunction:
             FnMut(Size<Option<f32>>, Size<AvailableSpace>, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
     {
+        self.compute_layout_with_measure_and_calc(
+            node_id,
+            available_space,
+            |inputs, node_id, node_context, style| {
+                measure_function(inputs.known_dimensions, inputs.available_space, node_id, node_context, style)
+            },
+            zero_calc_value,
+        )
+    }
+
+    /// Updates the stored layout of the provided `node` and its children using typed measurement inputs and a calc resolver
+    pub fn compute_layout_with_measure_and_calc<MeasureFunction, CalcFunction>(
+        &mut self,
+        node_id: NodeId,
+        available_space: Size<AvailableSpace>,
+        measure_function: MeasureFunction,
+        calc_function: CalcFunction,
+    ) -> Result<(), TaffyError>
+    where
+        MeasureFunction: FnMut(MeasureInput, NodeId, Option<&mut NodeContext>, &Style) -> Size<f32>,
+        CalcFunction: Fn(*const (), f32) -> f32,
+    {
         let use_rounding = self.config.use_rounding;
-        let mut taffy_view = TaffyView { taffy: self, measure_function };
+        let mut taffy_view = TaffyView { taffy: self, measure_function, calc_function: &calc_function };
         compute_root_layout(&mut taffy_view, node_id, available_space);
         if use_rounding {
             round_layout(&mut taffy_view, node_id);
@@ -939,7 +972,7 @@ impl<NodeContext> TaffyTree<NodeContext> {
     /// Returns an instance of LayoutTree representing the TaffyTree
     #[cfg(test)]
     pub(crate) fn as_layout_tree(&mut self) -> impl LayoutPartialTree + CacheTree + '_ {
-        TaffyView { taffy: self, measure_function: |_, _, _, _, _| Size::ZERO }
+        TaffyView { taffy: self, measure_function: |_, _, _, _| Size::ZERO, calc_function: &zero_calc_value }
     }
 }
 
@@ -947,9 +980,11 @@ impl<NodeContext> TaffyTree<NodeContext> {
 mod tests {
 
     use super::*;
-    use crate::style::{Dimension, Display, FlexDirection};
+    use crate::geometry::Rect;
+    use crate::style::{Dimension, Display, FlexDirection, LengthPercentage};
     use crate::style_helpers::*;
     use crate::util::sys;
+    use core::cell::{Cell, RefCell};
 
     fn size_measure_function(
         known_dimensions: Size<Option<f32>>,
@@ -1071,6 +1106,80 @@ mod tests {
         taffy.set_node_context(node, Some(Size { width: 100.0, height: 100.0 })).unwrap();
         taffy.compute_layout_with_measure(node, Size::MAX_CONTENT, size_measure_function).unwrap();
         assert_eq!(taffy.layout(node).unwrap().size.width, 100.0);
+    }
+
+    #[test]
+    fn typed_measure_input_and_calc_resolver_reach_leaf_layout() {
+        let calc_handle = core::ptr::without_provenance::<()>(8);
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let node = taffy
+            .new_leaf(Style {
+                padding: Rect {
+                    left: LengthPercentage::ZERO,
+                    right: LengthPercentage::ZERO,
+                    top: LengthPercentage::calc(calc_handle),
+                    bottom: LengthPercentage::calc(calc_handle),
+                },
+                ..Default::default()
+            })
+            .unwrap();
+        let observed_parent_size = Cell::new(Size::NONE);
+
+        taffy
+            .compute_layout_with_measure_and_calc(
+                node,
+                Size { width: AvailableSpace::Definite(100.0), height: AvailableSpace::MaxContent },
+                |inputs, _, _, _| {
+                    observed_parent_size.set(inputs.parent_size);
+                    Size::ZERO
+                },
+                |opaque, basis| {
+                    assert_eq!(opaque.addr(), calc_handle.addr());
+                    5.0 + basis * 0.1
+                },
+            )
+            .unwrap();
+
+        assert_eq!(observed_parent_size.get().width, Some(100.0));
+        assert_eq!(taffy.layout(node).unwrap().size.height, 30.0);
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn grid_measurement_receives_grid_area_context() {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let child = taffy.new_leaf(Style::default()).unwrap();
+        let root = taffy
+            .new_with_children(
+                Style {
+                    display: Display::Grid,
+                    size: Size { width: length(400.0), height: auto() },
+                    grid_template_columns: vec![length(100.0), length(300.0)],
+                    ..Default::default()
+                },
+                &[child],
+            )
+            .unwrap();
+        let observations = RefCell::new(Vec::new());
+
+        taffy
+            .compute_layout_with_measure_and_calc(
+                root,
+                Size::MAX_CONTENT,
+                |inputs, node, _, _| {
+                    if node == child {
+                        observations.borrow_mut().push(inputs);
+                    }
+                    Size::ZERO
+                },
+                |_, _| 0.0,
+            )
+            .unwrap();
+
+        assert!(observations.borrow().iter().any(|input| {
+            input.parent_size.width == Some(100.0)
+                && input.inline_percentage_basis.resolve(input.parent_size) == Some(100.0)
+        }));
     }
 
     #[test]

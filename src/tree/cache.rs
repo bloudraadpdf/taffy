@@ -89,6 +89,8 @@ struct CacheKey {
     kd_available_space: u64,
     /// The initial cached size of the parent's node
     parent_size: u64,
+    /// The resolved inline-axis percentage basis
+    inline_percentage_basis: u32,
 }
 
 impl CacheKey {
@@ -118,6 +120,7 @@ impl From<&LayoutInput> for CacheKey {
         Self {
             kd_available_space: size_mixed_cache_key(input.known_dimensions, input.available_space),
             parent_size: (size_option_cache_key(input.parent_size) & NON_SIGN_BITS_MASK) | extra_bits,
+            inline_percentage_basis: option_cache_key(input.inline_percentage_basis.resolve(input.parent_size)),
         }
     }
 }
@@ -230,6 +233,7 @@ impl Cache {
                 for entry in self.measure_entries.iter().flatten() {
                     if entry.key.kd_available_space == key.kd_available_space
                         && (entry.key.x_axis_parent_size() == key.x_axis_parent_size())
+                        && entry.key.inline_percentage_basis == key.inline_percentage_basis
                     {
                         return Some(LayoutOutput::from_outer_size(entry.content));
                     }
@@ -281,4 +285,36 @@ pub enum ClearState {
     Cleared,
     /// Everything was already cleared
     AlreadyEmpty,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::Line;
+    use crate::style_helpers::TaffyMaxContent;
+    use crate::tree::{InlinePercentageBasis, RequestedAxis, SizingMode};
+
+    fn input(inline_percentage_basis: InlinePercentageBasis) -> LayoutInput {
+        LayoutInput {
+            run_mode: RunMode::ComputeSize,
+            sizing_mode: SizingMode::InherentSize,
+            axis: RequestedAxis::Horizontal,
+            known_dimensions: Size::NONE,
+            parent_size: Size { width: Some(100.0), height: Some(200.0) },
+            inline_percentage_basis,
+            available_space: Size::MAX_CONTENT,
+            vertical_margins_are_collapsible: Line::FALSE,
+        }
+    }
+
+    #[test]
+    fn measurement_cache_keys_resolved_inline_percentage_basis() {
+        let mut cache = Cache::new();
+        let original = input(InlinePercentageBasis::Explicit(Some(100.0)));
+        cache.store(&original, LayoutOutput::from_outer_size(Size { width: 10.0, height: 20.0 }));
+
+        assert!(cache.get(&original).is_some());
+        assert!(cache.get(&input(InlinePercentageBasis::Explicit(Some(200.0)))).is_none());
+        assert!(cache.get(&input(InlinePercentageBasis::Explicit(None))).is_none());
+    }
 }
