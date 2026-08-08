@@ -1378,6 +1378,84 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "grid")]
+    fn column_rerun_probes_every_intrinsic_item() {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let first = taffy.new_leaf(Style::default()).unwrap();
+        let second = taffy.new_leaf(Style::default()).unwrap();
+        let root = taffy
+            .new_with_children(
+                Style {
+                    display: Display::Grid,
+                    grid_template_columns: vec![auto(), auto()],
+                    grid_template_rows: vec![auto()],
+                    ..Default::default()
+                },
+                &[first, second],
+            )
+            .unwrap();
+        let probed = RefCell::new(Vec::new());
+
+        taffy
+            .compute_layout_with_measure_and_calc(
+                root,
+                Size::MAX_CONTENT,
+                |inputs, node, _, _| {
+                    if inputs.parent_size.height == Some(20.0)
+                        && inputs.available_space.width == AvailableSpace::MinContent
+                    {
+                        probed.borrow_mut().push(node);
+                    }
+                    inputs
+                        .known_dimensions
+                        .unwrap_or(Size { width: inputs.parent_size.height.unwrap_or(10.0), height: 20.0 })
+                },
+                |_, _| 0.0,
+            )
+            .unwrap();
+
+        assert!(probed.borrow().contains(&first));
+        assert!(probed.borrow().contains(&second));
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn row_rerun_probes_items_crossing_only_intrinsic_rows() {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let child = taffy.new_leaf(Style::default()).unwrap();
+        let root = taffy
+            .new_with_children(
+                Style {
+                    display: Display::Grid,
+                    grid_template_columns: vec![percent(0.5)],
+                    grid_template_rows: vec![auto()],
+                    ..Default::default()
+                },
+                &[child],
+            )
+            .unwrap();
+        let row_min_content_measurements = Cell::new(0);
+
+        taffy
+            .compute_layout_with_measure_and_calc(
+                root,
+                Size::MAX_CONTENT,
+                |inputs, node, _, _| {
+                    if node == child && inputs.available_space.height == AvailableSpace::MinContent {
+                        row_min_content_measurements.set(row_min_content_measurements.get() + 1);
+                    }
+                    inputs
+                        .known_dimensions
+                        .unwrap_or(Size { width: 100.0, height: inputs.parent_size.width.unwrap_or(10.0) })
+                },
+                |_, _| 0.0,
+            )
+            .unwrap();
+
+        assert!(row_min_content_measurements.get() >= 3);
+    }
+
+    #[test]
     fn set_measure_of_previously_unmeasured_node() {
         let mut taffy: TaffyTree<Size<f32>> = TaffyTree::new();
         let node = taffy.new_leaf(Style::default()).unwrap();

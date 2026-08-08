@@ -19,7 +19,7 @@ use placement::place_grid_items;
 use track_sizing::{
     determine_if_item_crosses_flexible_or_intrinsic_tracks, resolve_item_track_indexes, track_sizing_algorithm,
 };
-use types::{CellOccupancyMatrix, GridTrack, NamedLineResolver, TrackCounts};
+use types::{CellOccupancyMatrix, GridTrack, IntrinsicContribution, NamedLineResolver, TrackCounts};
 
 #[cfg(feature = "detailed_layout_info")]
 use types::{GridItem, GridTrackKind};
@@ -416,34 +416,33 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
     rerun_column_sizing = parent_width_indefinite && has_percentage_column;
 
     if !rerun_column_sizing {
-        intrinsic_column_contribution_changed =
-            items.iter_mut().filter(|item| item.crosses_intrinsic_column).any(|item| {
-                let grid_area_size = item.grid_area_size(
-                    AbstractAxis::Inline,
-                    &columns,
-                    &rows,
-                    inner_node_size,
-                    |track: &GridTrack, _| Some(track.base_size),
-                    &|val, basis| tree.calc(val, basis),
-                );
-                let available_space = grid_area_size.with(AbstractAxis::Inline, None);
-                let new_min_content_contribution = item.min_content_contribution(
-                    AbstractAxis::Inline,
-                    tree,
-                    grid_area_size,
-                    item_inline_axis,
-                    available_space,
-                );
+        for item in items.iter_mut().filter(|item| item.crosses_intrinsic_column) {
+            let grid_area_size = item.grid_area_size(
+                AbstractAxis::Inline,
+                &columns,
+                &rows,
+                inner_node_size,
+                |track: &GridTrack, _| Some(track.base_size),
+                &|val, basis| tree.calc(val, basis),
+            );
+            let available_space = grid_area_size.with(AbstractAxis::Inline, None);
+            let new_min_content_contribution = item.content_contribution(
+                AbstractAxis::Inline,
+                tree,
+                grid_area_size,
+                item_inline_axis,
+                available_space,
+                IntrinsicContribution::MinContent,
+            );
 
-                let has_changed = Some(new_min_content_contribution) != item.min_content_contribution_cache.width;
+            intrinsic_column_contribution_changed |=
+                Some(new_min_content_contribution) != item.min_content_contribution_cache.width;
 
-                item.grid_area_size_cache = Some(grid_area_size);
-                item.min_content_contribution_cache.width = Some(new_min_content_contribution);
-                item.max_content_contribution_cache.width = None;
-                item.minimum_contribution_cache.width = None;
-
-                has_changed
-            });
+            item.grid_area_size_cache = Some(grid_area_size);
+            item.min_content_contribution_cache.width = Some(new_min_content_contribution);
+            item.max_content_contribution_cache.width = None;
+            item.minimum_contribution_cache.width = None;
+        }
         rerun_column_sizing = intrinsic_column_contribution_changed;
     } else {
         // Clear intrinsic width caches
@@ -486,34 +485,33 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         rerun_row_sizing = parent_height_indefinite && has_percentage_row;
 
         if !rerun_row_sizing {
-            intrinsic_row_contribution_changed =
-                items.iter_mut().filter(|item| item.crosses_intrinsic_column).any(|item| {
-                    let grid_area_size = item.grid_area_size(
-                        AbstractAxis::Block,
-                        &rows,
-                        &columns,
-                        inner_node_size,
-                        |track: &GridTrack, _| Some(track.base_size),
-                        &|val, basis| tree.calc(val, basis),
-                    );
-                    let available_space = grid_area_size.with(AbstractAxis::Block, None);
-                    let new_min_content_contribution = item.min_content_contribution(
-                        AbstractAxis::Block,
-                        tree,
-                        grid_area_size,
-                        item_inline_axis,
-                        available_space,
-                    );
+            for item in items.iter_mut().filter(|item| item.crosses_intrinsic_row) {
+                let grid_area_size = item.grid_area_size(
+                    AbstractAxis::Block,
+                    &rows,
+                    &columns,
+                    inner_node_size,
+                    |track: &GridTrack, _| Some(track.base_size),
+                    &|val, basis| tree.calc(val, basis),
+                );
+                let available_space = grid_area_size.with(AbstractAxis::Block, None);
+                let new_min_content_contribution = item.content_contribution(
+                    AbstractAxis::Block,
+                    tree,
+                    grid_area_size,
+                    item_inline_axis,
+                    available_space,
+                    IntrinsicContribution::MinContent,
+                );
 
-                    let has_changed = Some(new_min_content_contribution) != item.min_content_contribution_cache.height;
+                intrinsic_row_contribution_changed |=
+                    Some(new_min_content_contribution) != item.min_content_contribution_cache.height;
 
-                    item.grid_area_size_cache = Some(grid_area_size);
-                    item.min_content_contribution_cache.height = Some(new_min_content_contribution);
-                    item.max_content_contribution_cache.height = None;
-                    item.minimum_contribution_cache.height = None;
-
-                    has_changed
-                });
+                item.grid_area_size_cache = Some(grid_area_size);
+                item.min_content_contribution_cache.height = Some(new_min_content_contribution);
+                item.max_content_contribution_cache.height = None;
+                item.minimum_contribution_cache.height = None;
+            }
             rerun_row_sizing = intrinsic_row_contribution_changed;
         } else {
             items.iter_mut().for_each(|item| {
