@@ -1,12 +1,11 @@
 //! Implements the track sizing algorithm
 //! <https://www.w3.org/TR/css-grid-1/#layout-algorithm>
 use super::types::{GridItem, GridTrack, TrackCounts};
-use crate::geometry::{AbstractAxis, Line, Size};
+use crate::geometry::{AbsoluteAxis, AbstractAxis, Line, Size};
 use crate::style::{AlignContent, AlignContentKeyword, AlignSelf, AvailableSpace};
-use crate::style_helpers::TaffyMinContent;
-use crate::tree::{LayoutPartialTree, LayoutPartialTreeExt, SizingMode};
+use crate::tree::{LayoutInput, LayoutPartialTree, LayoutPartialTreeExt, RequestedAxis, RunMode, SizingMode};
 use crate::util::sys::{f32_max, f32_min, Vec};
-use crate::util::{MaybeMath, ResolveOrZero};
+use crate::util::MaybeMath;
 use crate::CompactLength;
 use core::cmp::Ordering;
 
@@ -78,6 +77,8 @@ where
     get_track_size_estimate: EstimateFunction,
     /// The axis we are currently sizing
     axis: AbstractAxis,
+    /// The physical axis that carries each item's logical inline size
+    item_inline_axis: AbsoluteAxis,
     /// The available grid space
     inner_node_size: Size<Option<f32>>,
 }
@@ -106,8 +107,8 @@ where
     /// Compute the item's resolved margins for size contributions. Horizontal percentage margins always resolve
     /// to zero if the container size is indefinite as otherwise this would introduce a cyclic dependency.
     #[inline(always)]
-    fn margins_axis_sums_with_baseline_shims(&self, item: &GridItem, percentage_basis: Option<f32>) -> Size<f32> {
-        item.margins_axis_sums_with_baseline_shims(percentage_basis, self.tree)
+    fn margins_axis_sums_with_baseline_shims(&self, item: &GridItem, grid_area_size: Size<Option<f32>>) -> Size<f32> {
+        item.margins_axis_sums_with_baseline_shims(grid_area_size, self.item_inline_axis, self.axis, self.tree)
     }
 
     /// Simple pass-through function to `LayoutPartialTreeExt::calc`
@@ -121,8 +122,14 @@ where
     fn min_content_contribution(&mut self, item: &mut GridItem, axis_tracks: &[GridTrack]) -> f32 {
         let grid_area_size = self.grid_area_size(item, axis_tracks);
         let available_space = grid_area_size.with(self.axis, None);
-        let margin_axis_sums = self.margins_axis_sums_with_baseline_shims(item, available_space.width);
-        let contribution = item.min_content_contribution_cached(self.axis, self.tree, grid_area_size, available_space);
+        let margin_axis_sums = self.margins_axis_sums_with_baseline_shims(item, grid_area_size);
+        let contribution = item.min_content_contribution_cached(
+            self.axis,
+            self.tree,
+            grid_area_size,
+            self.item_inline_axis,
+            available_space,
+        );
         contribution + margin_axis_sums.get(self.axis)
     }
 
@@ -131,8 +138,14 @@ where
     fn max_content_contribution(&mut self, item: &mut GridItem, axis_tracks: &[GridTrack]) -> f32 {
         let grid_area_size = self.grid_area_size(item, axis_tracks);
         let available_space = grid_area_size.with(self.axis, None);
-        let margin_axis_sums = self.margins_axis_sums_with_baseline_shims(item, available_space.width);
-        let contribution = item.max_content_contribution_cached(self.axis, self.tree, grid_area_size, available_space);
+        let margin_axis_sums = self.margins_axis_sums_with_baseline_shims(item, grid_area_size);
+        let contribution = item.max_content_contribution_cached(
+            self.axis,
+            self.tree,
+            grid_area_size,
+            self.item_inline_axis,
+            available_space,
+        );
         contribution + margin_axis_sums.get(self.axis)
     }
 
@@ -146,10 +159,15 @@ where
     #[inline(always)]
     fn minimum_contribution(&mut self, item: &mut GridItem, axis_tracks: &[GridTrack]) -> f32 {
         let grid_area_size = self.grid_area_size(item, axis_tracks);
-        let available_space = grid_area_size.with(self.axis, None);
-        let margin_axis_sums = self.margins_axis_sums_with_baseline_shims(item, available_space.width);
-        let contribution =
-            item.minimum_contribution_cached(self.tree, self.axis, axis_tracks, grid_area_size, self.inner_node_size);
+        let margin_axis_sums = self.margins_axis_sums_with_baseline_shims(item, grid_area_size);
+        let contribution = item.minimum_contribution_cached(
+            self.tree,
+            self.axis,
+            axis_tracks,
+            grid_area_size,
+            self.item_inline_axis,
+            self.inner_node_size,
+        );
         contribution + margin_axis_sums.get(self.axis)
     }
 }
@@ -273,6 +291,7 @@ pub(super) fn determine_if_item_crosses_flexible_or_intrinsic_tracks(
 pub(super) fn track_sizing_algorithm<Tree: LayoutPartialTree>(
     tree: &mut Tree,
     axis: AbstractAxis,
+    item_inline_axis: AbsoluteAxis,
     axis_min_size: Option<f32>,
     axis_max_size: Option<f32>,
     axis_alignment: AlignContent,
@@ -292,7 +311,15 @@ pub(super) fn track_sizing_algorithm<Tree: LayoutPartialTree>(
 
     // 11.5.1 Shim item baselines
     if has_baseline_aligned_item {
-        resolve_item_baselines(tree, axis, items, inner_node_size);
+        resolve_item_baselines(
+            tree,
+            (axis, item_inline_axis),
+            axis_tracks,
+            other_axis_tracks,
+            items,
+            inner_node_size,
+            get_track_size_estimate,
+        );
     }
 
     // If all tracks have base_size = growth_limit, then skip the rest of this function.
@@ -323,6 +350,7 @@ pub(super) fn track_sizing_algorithm<Tree: LayoutPartialTree>(
     resolve_intrinsic_track_sizes(
         tree,
         axis,
+        item_inline_axis,
         axis_tracks,
         other_axis_tracks,
         items,
@@ -353,11 +381,15 @@ pub(super) fn track_sizing_algorithm<Tree: LayoutPartialTree>(
     expand_flexible_tracks(
         tree,
         axis,
+        item_inline_axis,
         axis_tracks,
+        other_axis_tracks,
         items,
         axis_min_size,
         axis_max_size,
         axis_available_space_for_expansion,
+        inner_node_size,
+        get_track_size_estimate,
     );
 
     // 11.8. Stretch auto Tracks
@@ -447,12 +479,16 @@ fn initialize_track_sizes(
 }
 
 /// 11.5.1 Shim baseline-aligned items so their intrinsic size contributions reflect their baseline alignment.
-fn resolve_item_baselines(
-    tree: &mut impl LayoutPartialTree,
-    axis: AbstractAxis,
+fn resolve_item_baselines<Tree: LayoutPartialTree>(
+    tree: &mut Tree,
+    axes: (AbstractAxis, AbsoluteAxis),
+    axis_tracks: &[GridTrack],
+    other_axis_tracks: &[GridTrack],
     items: &mut [GridItem],
     inner_node_size: Size<Option<f32>>,
+    get_track_size_estimate: fn(&GridTrack, Option<f32>, &Tree) -> Option<f32>,
 ) {
+    let (axis, item_inline_axis) = axes;
     // Sort items by track in the other axis (row) start position so that we can iterate items in groups which
     // are in the same track in the other axis (row)
     let other_axis = axis.other();
@@ -492,21 +528,35 @@ fn resolve_item_baselines(
 
         // Compute the baselines of all items in the row
         for item in row_items.iter_mut() {
-            let measured_size_and_baselines = tree.perform_child_layout(
-                item.node,
-                Size::NONE,
+            let grid_area_size = item.grid_area_size(
+                axis,
+                axis_tracks,
+                other_axis_tracks,
                 inner_node_size,
-                Size::MIN_CONTENT,
-                SizingMode::InherentSize,
-                Line::FALSE,
+                |track, basis| get_track_size_estimate(track, basis, tree),
+                &|val, basis| tree.calc(val, basis),
+            );
+            let measured_size_and_baselines = tree.compute_child_layout(
+                item.node,
+                LayoutInput {
+                    known_dimensions: Size::NONE,
+                    parent_size: grid_area_size,
+                    inline_percentage_basis: item.child_inline_percentage_basis(grid_area_size, item_inline_axis, axis),
+                    available_space: grid_area_size
+                        .with(axis, None)
+                        .map(|size| size.map_or(AvailableSpace::MinContent, AvailableSpace::Definite)),
+                    sizing_mode: SizingMode::InherentSize,
+                    axis: RequestedAxis::Both,
+                    run_mode: RunMode::PerformLayout,
+                    vertical_margins_are_collapsible: Line::FALSE,
+                },
             );
 
             let baseline = measured_size_and_baselines.first_baselines.y;
             let height = measured_size_and_baselines.size.height;
 
             item.baseline = Some(
-                baseline.unwrap_or(height)
-                    + item.margin.top.resolve_or_zero(inner_node_size.width, |val, basis| tree.calc(val, basis)),
+                baseline.unwrap_or(height) + item.resolved_margin_top(grid_area_size, item_inline_axis, axis, tree),
             );
         }
 
@@ -526,6 +576,7 @@ fn resolve_item_baselines(
 fn resolve_intrinsic_track_sizes<Tree: LayoutPartialTree>(
     tree: &mut Tree,
     axis: AbstractAxis,
+    item_inline_axis: AbsoluteAxis,
     axis_tracks: &mut [GridTrack],
     other_axis_tracks: &[GridTrack],
     items: &mut [GridItem],
@@ -556,8 +607,14 @@ fn resolve_intrinsic_track_sizes<Tree: LayoutPartialTree>(
     // Also, minimum contribution <= min-content contribution <= max-content contribution.
 
     let axis_inner_node_size = inner_node_size.get(axis);
-    let mut item_sizer =
-        IntrinsicSizeMeasurer { tree, other_axis_tracks, axis, inner_node_size, get_track_size_estimate };
+    let mut item_sizer = IntrinsicSizeMeasurer {
+        tree,
+        other_axis_tracks,
+        axis,
+        item_inline_axis,
+        inner_node_size,
+        get_track_size_estimate,
+    };
 
     let mut batched_item_iterator = ItemBatcher::new(axis);
     while let Some((batch, is_flex)) = batched_item_iterator.next(items) {
@@ -1186,14 +1243,18 @@ fn maximise_tracks(
 /// This step sizes flexible tracks using the largest value it can assign to an fr without exceeding the available space.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-fn expand_flexible_tracks(
-    tree: &mut impl LayoutPartialTree,
+fn expand_flexible_tracks<Tree: LayoutPartialTree>(
+    tree: &mut Tree,
     axis: AbstractAxis,
+    item_inline_axis: AbsoluteAxis,
     axis_tracks: &mut [GridTrack],
+    other_axis_tracks: &[GridTrack],
     items: &mut [GridItem],
     axis_min_size: Option<f32>,
     axis_max_size: Option<f32>,
     axis_available_space_for_expansion: AvailableSpace,
+    inner_node_size: Size<Option<f32>>,
+    get_track_size_estimate: fn(&GridTrack, Option<f32>, &Tree) -> Option<f32>,
 ) {
     // First, find the grid’s used flex fraction:
     let flex_fraction = match axis_available_space_for_expansion {
@@ -1239,9 +1300,22 @@ fn expand_flexible_tracks(
                     .filter(|item| item.crosses_flexible_track(axis))
                     .map(|item| {
                         let tracks = &axis_tracks[item.track_range_excluding_lines(axis)];
-                        // TODO: plumb estimate of other axis size (known_dimensions) in here rather than just passing Size::NONE?
-                        let max_content_contribution =
-                            item.max_content_contribution_cached(axis, tree, Size::NONE, Size::NONE);
+                        let grid_area_size = item.grid_area_size_cached(
+                            axis,
+                            axis_tracks,
+                            other_axis_tracks,
+                            inner_node_size,
+                            |track, basis| get_track_size_estimate(track, basis, tree),
+                            &|val, basis| tree.calc(val, basis),
+                        );
+                        let available_space = grid_area_size.with(axis, None);
+                        let max_content_contribution = item.max_content_contribution_cached(
+                            axis,
+                            tree,
+                            grid_area_size,
+                            item_inline_axis,
+                            available_space,
+                        );
                         find_size_of_fr(tracks, max_content_contribution)
                     })
                     .max_by(|a, b| a.total_cmp(b))

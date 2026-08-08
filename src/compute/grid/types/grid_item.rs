@@ -1,13 +1,61 @@
 //! Contains GridItem used to represent a single grid item during layout
 use super::GridTrack;
 use crate::compute::grid::OriginZeroLine;
-use crate::geometry::AbstractAxis;
+use crate::geometry::{AbsoluteAxis, AbstractAxis};
 use crate::geometry::{Line, Point, Rect, Size};
 use crate::style::{AlignItems, AlignSelf, AvailableSpace, Dimension, LengthPercentageAuto, Overflow};
-use crate::tree::{LayoutPartialTree, LayoutPartialTreeExt, NodeId, SizingMode};
+use crate::tree::{
+    InlinePercentageBasis, LayoutInput, LayoutPartialTree, LayoutPartialTreeExt, NodeId, RunMode, SizingMode,
+};
 use crate::util::{MaybeMath, MaybeResolve, ResolveOrZero};
 use crate::{BoxSizing, GridItemStyle, LengthPercentage};
 use core::ops::Range;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// The intrinsic contribution currently being measured for a grid item
+pub(in crate::compute::grid) enum IntrinsicContribution {
+    /// The min-content contribution
+    MinContent,
+    /// The max-content contribution
+    MaxContent,
+    /// The automatic minimum contribution
+    Minimum,
+}
+
+/// Resolve the preferred-size percentage basis for an intrinsic contribution
+#[inline(always)]
+fn preferred_size_basis(
+    grid_area_size: Size<Option<f32>>,
+    contribution_axis: AbstractAxis,
+    contribution: IntrinsicContribution,
+    is_replaced: bool,
+) -> Size<Option<f32>> {
+    let mut basis = grid_area_size;
+    if basis.get(contribution_axis).is_none() && is_replaced && contribution == IntrinsicContribution::MinContent {
+        basis.set(contribution_axis, Some(0.0));
+    }
+    basis
+}
+
+/// Resolve the minimum-size percentage basis for an intrinsic contribution
+#[inline(always)]
+fn minimum_size_basis(grid_area_size: Size<Option<f32>>, contribution_axis: AbstractAxis) -> Size<Option<f32>> {
+    let mut basis = grid_area_size;
+    if basis.get(contribution_axis).is_none() {
+        basis.set(contribution_axis, Some(0.0));
+    }
+    basis
+}
+
+/// Resolve the logical inline percentage basis, breaking a cycle only in the active contribution axis
+#[inline(always)]
+fn inline_percentage_basis(
+    grid_area_size: Size<Option<f32>>,
+    inline_axis: AbsoluteAxis,
+    contribution_axis: AbstractAxis,
+) -> Option<f32> {
+    grid_area_size.get_abs(inline_axis).or_else(|| (inline_axis == contribution_axis.as_abs_naive()).then_some(0.0))
+}
 
 /// Represents a single grid item
 #[derive(Debug)]
@@ -245,8 +293,12 @@ impl GridItem {
         &self,
         tree: &mut impl LayoutPartialTree,
         grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
+        contribution_axis: AbstractAxis,
+        contribution: IntrinsicContribution,
     ) -> Size<Option<f32>> {
-        let margins = self.margins_axis_sums_with_baseline_shims(grid_area_size.width, tree);
+        let margins =
+            self.margins_axis_sums_with_baseline_shims(grid_area_size, item_inline_axis, contribution_axis, tree);
 
         let aspect_ratio = self.aspect_ratio;
         // CSS resolves percentage padding and border against the inline size of the containing
@@ -255,24 +307,28 @@ impl GridItem {
         // Spec:
         // https://www.w3.org/TR/css-grid-1/#item-margins
         // https://www.w3.org/TR/CSS22/box.html#padding-properties
-        let padding = self.padding.resolve_or_zero(grid_area_size.width, |val, basis| tree.calc(val, basis));
-        let border = self.border.resolve_or_zero(grid_area_size.width, |val, basis| tree.calc(val, basis));
+        let edge_basis = inline_percentage_basis(grid_area_size, item_inline_axis, contribution_axis);
+        let padding = self.padding.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
+        let border = self.border.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
         let padding_border_size = (padding + border).sum_axes();
         let box_sizing_adjustment =
             if self.box_sizing == BoxSizing::ContentBox { padding_border_size } else { Size::ZERO };
+        let preferred_size_basis =
+            preferred_size_basis(grid_area_size, contribution_axis, contribution, self.is_compressible_replaced);
+        let minimum_size_basis = minimum_size_basis(grid_area_size, contribution_axis);
         let inherent_size = self
             .size
-            .maybe_resolve(grid_area_size, |val, basis| tree.calc(val, basis))
+            .maybe_resolve(preferred_size_basis, |val, basis| tree.calc(val, basis))
             .maybe_apply_aspect_ratio(aspect_ratio)
             .maybe_add(box_sizing_adjustment);
         let min_size = self
             .min_size
-            .maybe_resolve(grid_area_size, |val, basis| tree.calc(val, basis))
+            .maybe_resolve(minimum_size_basis, |val, basis| tree.calc(val, basis))
             .maybe_apply_aspect_ratio(aspect_ratio)
             .maybe_add(box_sizing_adjustment);
         let max_size = self
             .max_size
-            .maybe_resolve(grid_area_size, |val, basis| tree.calc(val, basis))
+            .maybe_resolve(preferred_size_basis, |val, basis| tree.calc(val, basis))
             .maybe_apply_aspect_ratio(aspect_ratio)
             .maybe_add(box_sizing_adjustment);
 
@@ -403,45 +459,89 @@ impl GridItem {
     #[inline(always)]
     pub fn margins_axis_sums_with_baseline_shims(
         &self,
-        inner_node_width: Option<f32>,
+        grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
+        contribution_axis: AbstractAxis,
         tree: &impl LayoutPartialTree,
     ) -> Size<f32> {
+        let edge_basis = inline_percentage_basis(grid_area_size, item_inline_axis, contribution_axis);
         Rect {
-            left: self.margin.left.resolve_or_zero(Some(0.0), |val, basis| tree.calc(val, basis)),
-            right: self.margin.right.resolve_or_zero(Some(0.0), |val, basis| tree.calc(val, basis)),
-            top: self.margin.top.resolve_or_zero(inner_node_width, |val, basis| tree.calc(val, basis))
-                + self.baseline_shim,
-            bottom: self.margin.bottom.resolve_or_zero(inner_node_width, |val, basis| tree.calc(val, basis)),
+            left: self.margin.left.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)),
+            right: self.margin.right.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)),
+            top: self.margin.top.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)) + self.baseline_shim,
+            bottom: self.margin.bottom.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)),
         }
         .sum_axes()
     }
 
-    /// Compute the item's min content contribution from the provided parameters
-    pub fn min_content_contribution(
+    /// Resolve the physical top margin against the grid area's logical inline size
+    #[inline(always)]
+    pub fn resolved_margin_top(
+        &self,
+        grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
+        contribution_axis: AbstractAxis,
+        tree: &impl LayoutPartialTree,
+    ) -> f32 {
+        self.margin.top.resolve_or_zero(
+            inline_percentage_basis(grid_area_size, item_inline_axis, contribution_axis),
+            |val, basis| tree.calc(val, basis),
+        )
+    }
+
+    /// Build the inline percentage basis passed to this item's child layout
+    #[inline(always)]
+    pub fn child_inline_percentage_basis(
+        &self,
+        grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
+        contribution_axis: AbstractAxis,
+    ) -> InlinePercentageBasis {
+        InlinePercentageBasis::Explicit(inline_percentage_basis(grid_area_size, item_inline_axis, contribution_axis))
+    }
+
+    /// Compute the item's requested intrinsic content contribution from the provided parameters
+    pub(in crate::compute::grid) fn content_contribution(
         &self,
         axis: AbstractAxis,
         tree: &mut impl LayoutPartialTree,
         grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
         available_space: Size<Option<f32>>,
+        contribution: IntrinsicContribution,
     ) -> f32 {
-        let known_dimensions = self.known_dimensions(tree, grid_area_size);
+        let known_dimensions = self.known_dimensions(tree, grid_area_size, item_inline_axis, axis, contribution);
+        let indefinite_available_space = match contribution {
+            IntrinsicContribution::MinContent => AvailableSpace::MinContent,
+            IntrinsicContribution::MaxContent => AvailableSpace::MaxContent,
+            IntrinsicContribution::Minimum => unreachable!("minimum contribution is not a content contribution"),
+        };
+
         // The child sees the grid area as its containing block during intrinsic measurement, so
         // percentage box properties resolve against the grid area when that size is definite.
         // Spec:
         // https://www.w3.org/TR/css-grid-1/#grid-item-sizing
         // https://www.w3.org/TR/css-grid-1/#algo-overview
-        tree.measure_child_size(
+        tree.compute_child_layout(
             self.node,
-            known_dimensions,
-            grid_area_size,
-            available_space.map(|opt| match opt {
-                Some(size) => AvailableSpace::Definite(size),
-                None => AvailableSpace::MinContent,
-            }),
-            SizingMode::InherentSize,
-            axis.as_abs_naive(),
-            Line::FALSE,
+            LayoutInput {
+                known_dimensions,
+                parent_size: grid_area_size,
+                inline_percentage_basis: InlinePercentageBasis::Explicit(inline_percentage_basis(
+                    grid_area_size,
+                    item_inline_axis,
+                    axis,
+                )),
+                available_space: available_space
+                    .map(|size| size.map_or(indefinite_available_space, AvailableSpace::Definite)),
+                sizing_mode: SizingMode::InherentSize,
+                axis: axis.as_abs_naive().into(),
+                run_mode: RunMode::ComputeSize,
+                vertical_margins_are_collapsible: Line::FALSE,
+            },
         )
+        .size
+        .get(axis)
     }
 
     /// Retrieve the item's min content contribution from the cache or compute it using the provided parameters
@@ -451,39 +551,21 @@ impl GridItem {
         axis: AbstractAxis,
         tree: &mut impl LayoutPartialTree,
         grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
         available_space: Size<Option<f32>>,
     ) -> f32 {
         self.min_content_contribution_cache.get(axis).unwrap_or_else(|| {
-            let size = self.min_content_contribution(axis, tree, grid_area_size, available_space);
+            let size = self.content_contribution(
+                axis,
+                tree,
+                grid_area_size,
+                item_inline_axis,
+                available_space,
+                IntrinsicContribution::MinContent,
+            );
             self.min_content_contribution_cache.set(axis, Some(size));
             size
         })
-    }
-
-    /// Compute the item's max content contribution from the provided parameters
-    pub fn max_content_contribution(
-        &self,
-        axis: AbstractAxis,
-        tree: &mut impl LayoutPartialTree,
-        grid_area_size: Size<Option<f32>>,
-        available_space: Size<Option<f32>>,
-    ) -> f32 {
-        let known_dimensions = self.known_dimensions(tree, grid_area_size);
-        // See the min-content path above. Max-content measurement uses the same containing-block
-        // basis so percentage-dependent item geometry is measured from the grid area rather than
-        // from the container.
-        tree.measure_child_size(
-            self.node,
-            known_dimensions,
-            grid_area_size,
-            available_space.map(|opt| match opt {
-                Some(size) => AvailableSpace::Definite(size),
-                None => AvailableSpace::MaxContent,
-            }),
-            SizingMode::InherentSize,
-            axis.as_abs_naive(),
-            Line::FALSE,
-        )
     }
 
     /// Retrieve the item's max content contribution from the cache or compute it using the provided parameters
@@ -493,10 +575,18 @@ impl GridItem {
         axis: AbstractAxis,
         tree: &mut impl LayoutPartialTree,
         grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
         available_space: Size<Option<f32>>,
     ) -> f32 {
         self.max_content_contribution_cache.get(axis).unwrap_or_else(|| {
-            let size = self.max_content_contribution(axis, tree, grid_area_size, available_space);
+            let size = self.content_contribution(
+                axis,
+                tree,
+                grid_area_size,
+                item_inline_axis,
+                available_space,
+                IntrinsicContribution::MaxContent,
+            );
             self.max_content_contribution_cache.set(axis, Some(size));
             size
         })
@@ -516,21 +606,26 @@ impl GridItem {
         axis: AbstractAxis,
         axis_tracks: &[GridTrack],
         grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
         inner_node_size: Size<Option<f32>>,
     ) -> f32 {
-        let padding = self.padding.resolve_or_zero(grid_area_size.width, |val, basis| tree.calc(val, basis));
-        let border = self.border.resolve_or_zero(grid_area_size.width, |val, basis| tree.calc(val, basis));
+        let edge_basis = inline_percentage_basis(grid_area_size, item_inline_axis, axis);
+        let padding = self.padding.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
+        let border = self.border.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
         let padding_border_size = (padding + border).sum_axes();
         let box_sizing_adjustment =
             if self.box_sizing == BoxSizing::ContentBox { padding_border_size } else { Size::ZERO };
+        let preferred_size_basis =
+            preferred_size_basis(grid_area_size, axis, IntrinsicContribution::Minimum, self.is_compressible_replaced);
+        let minimum_size_basis = minimum_size_basis(grid_area_size, axis);
         self.size
-            .maybe_resolve(grid_area_size, |val, basis| tree.calc(val, basis))
+            .maybe_resolve(preferred_size_basis, |val, basis| tree.calc(val, basis))
             .maybe_apply_aspect_ratio(self.aspect_ratio)
             .maybe_add(box_sizing_adjustment)
             .get(axis)
             .or_else(|| {
                 self.min_size
-                    .maybe_resolve(grid_area_size, |val, basis| tree.calc(val, basis))
+                    .maybe_resolve(minimum_size_basis, |val, basis| tree.calc(val, basis))
                     .maybe_apply_aspect_ratio(self.aspect_ratio)
                     .maybe_add(box_sizing_adjustment)
                     .get(axis)
@@ -561,8 +656,13 @@ impl GridItem {
 
                 // Otherwise, the automatic minimum size is zero, as usual.
                 if use_content_based_minimum {
-                    let mut minimum_contribution =
-                        self.min_content_contribution_cached(axis, tree, grid_area_size, grid_area_size);
+                    let mut minimum_contribution = self.min_content_contribution_cached(
+                        axis,
+                        tree,
+                        grid_area_size,
+                        item_inline_axis,
+                        grid_area_size,
+                    );
 
                     // If the item is a compressible replaced element, and has a definite preferred size or maximum size in the
                     // relevant axis, the size suggestion is capped by those sizes; for this purpose, any indefinite percentages
@@ -597,12 +697,64 @@ impl GridItem {
         axis: AbstractAxis,
         axis_tracks: &[GridTrack],
         grid_area_size: Size<Option<f32>>,
+        item_inline_axis: AbsoluteAxis,
         inner_node_size: Size<Option<f32>>,
     ) -> f32 {
         self.minimum_contribution_cache.get(axis).unwrap_or_else(|| {
-            let size = self.minimum_contribution(tree, axis, axis_tracks, grid_area_size, inner_node_size);
+            let size =
+                self.minimum_contribution(tree, axis, axis_tracks, grid_area_size, item_inline_axis, inner_node_size);
             self.minimum_contribution_cache.set(axis, Some(size));
             size
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::geometry::AbsoluteAxis;
+    use crate::style_helpers::TaffyAuto;
+
+    #[test]
+    fn cyclic_preferred_size_basis_is_axis_correct() {
+        let area = Size { width: None, height: Some(80.0) };
+
+        assert_eq!(preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MinContent, false), area);
+        assert_eq!(preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MaxContent, true), area);
+        assert_eq!(
+            preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MinContent, true),
+            Size { width: Some(0.0), height: Some(80.0) }
+        );
+    }
+
+    #[test]
+    fn replaced_min_content_does_not_zero_an_indefinite_opposite_axis() {
+        let basis = preferred_size_basis(Size::NONE, AbstractAxis::Inline, IntrinsicContribution::MinContent, true);
+        let resolved = Size { width: Dimension::AUTO, height: Dimension::percent(0.5) }
+            .maybe_resolve(basis, |_, _| 0.0)
+            .maybe_apply_aspect_ratio(Some(2.0));
+
+        assert_eq!(basis, Size { width: Some(0.0), height: None });
+        assert_eq!(resolved, Size::NONE);
+    }
+
+    #[test]
+    fn cyclic_minimum_and_edge_bases_are_axis_correct() {
+        assert_eq!(minimum_size_basis(Size::NONE, AbstractAxis::Block), Size { width: None, height: Some(0.0) });
+        assert_eq!(inline_percentage_basis(Size::NONE, AbsoluteAxis::Horizontal, AbstractAxis::Inline), Some(0.0));
+        assert_eq!(inline_percentage_basis(Size::NONE, AbsoluteAxis::Vertical, AbstractAxis::Inline), None);
+    }
+
+    #[test]
+    #[cfg(feature = "calc")]
+    fn cyclic_edge_basis_preserves_calc_fixed_term() {
+        let handle = core::ptr::without_provenance::<()>(24);
+        let basis = inline_percentage_basis(Size::NONE, AbsoluteAxis::Horizontal, AbstractAxis::Inline);
+        let value = LengthPercentage::calc(handle).resolve_or_zero(basis, |opaque, basis| {
+            assert_eq!(opaque.addr(), handle.addr());
+            5.0 + basis * 0.1
+        });
+
+        assert_eq!(value, 5.0);
     }
 }

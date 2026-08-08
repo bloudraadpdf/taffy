@@ -3,12 +3,14 @@ use super::types::GridTrack;
 use crate::compute::common::alignment::{
     apply_alignment_fallback, compute_alignment_offset, resolve_self_alignment_safety,
 };
-use crate::geometry::{InBothAbsAxis, Line, Point, Rect, Size};
+use crate::geometry::{AbsoluteAxis, InBothAbsAxis, Line, Point, Rect, Size};
 use crate::style::{
     AlignContent, AlignItems, AlignItemsKeyword, AlignSelf, AvailableSpace, CoreStyle, GridItemStyle, Overflow,
     Position,
 };
-use crate::tree::{Layout, LayoutPartialTreeExt, NodeId, SizingMode};
+use crate::tree::{
+    InlinePercentageBasis, Layout, LayoutInput, LayoutPartialTreeExt, NodeId, RequestedAxis, RunMode, SizingMode,
+};
 use crate::util::sys::f32_max;
 use crate::util::{MaybeMath, MaybeResolve, ResolveOrZero};
 
@@ -82,6 +84,7 @@ pub(super) fn align_and_position_item(
     node: NodeId,
     order: u32,
     grid_area: Rect<f32>,
+    item_inline_axis: AbsoluteAxis,
     container_alignment_styles: InBothAbsAxis<Option<AlignItems>>,
     baseline_shim: f32,
     direction: Direction,
@@ -89,6 +92,8 @@ pub(super) fn align_and_position_item(
     container_border: Rect<f32>,
 ) -> (Size<f32>, f32, f32) {
     let grid_area_size = Size { width: grid_area.right - grid_area.left, height: grid_area.bottom - grid_area.top };
+    let item_inline_size = grid_area_size.get_abs(item_inline_axis);
+    let edge_basis = Some(item_inline_size);
 
     let style = tree.get_grid_child_style(node);
 
@@ -119,10 +124,8 @@ pub(super) fn align_and_position_item(
         .inset()
         .vertical_components()
         .map(|size| size.resolve_to_option(grid_area_size.height, |val, basis| tree.calc(val, basis)));
-    let padding =
-        style.padding().map(|p| p.resolve_or_zero(Some(grid_area_size.width), |val, basis| tree.calc(val, basis)));
-    let border =
-        style.border().map(|p| p.resolve_or_zero(Some(grid_area_size.width), |val, basis| tree.calc(val, basis)));
+    let padding = style.padding().map(|p| p.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)));
+    let border = style.border().map(|p| p.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)));
     let padding_border_size = (padding + border).sum_axes();
 
     let box_sizing_adjustment =
@@ -167,10 +170,9 @@ pub(super) fn align_and_position_item(
         }),
     };
 
-    // Note: This is not a bug. It is part of the CSS spec that both horizontal and vertical margins
-    // resolve against the WIDTH of the grid area.
+    // Both physical margin axes resolve against the logical inline size of the grid area.
     let margin =
-        style.margin().map(|margin| margin.resolve_to_option(grid_area_size.width, |val, basis| tree.calc(val, basis)));
+        style.margin().map(|margin| margin.resolve_to_option(item_inline_size, |val, basis| tree.calc(val, basis)));
 
     let grid_area_minus_item_margins_size = Size {
         width: grid_area_size.width.maybe_sub(margin.left).maybe_sub(margin.right),
@@ -236,28 +238,29 @@ pub(super) fn align_and_position_item(
     // Layout node
     drop(style);
 
-    let size = if position == Position::Absolute && (width.is_none() || height.is_none()) {
-        tree.measure_child_size_both(
+    let mut layout_child = |known_dimensions, run_mode| {
+        tree.compute_child_layout(
             node,
-            Size { width, height },
-            grid_area_size.map(Option::Some),
-            grid_area_minus_item_margins_size.map(AvailableSpace::Definite),
-            SizingMode::InherentSize,
-            Line::FALSE,
+            LayoutInput {
+                known_dimensions,
+                parent_size: grid_area_size.map(Option::Some),
+                inline_percentage_basis: InlinePercentageBasis::Explicit(edge_basis),
+                available_space: grid_area_minus_item_margins_size.map(AvailableSpace::Definite),
+                sizing_mode: SizingMode::InherentSize,
+                axis: RequestedAxis::Both,
+                run_mode,
+                vertical_margins_are_collapsible: Line::FALSE,
+            },
         )
-        .map(Some)
+    };
+
+    let size = if position == Position::Absolute && (width.is_none() || height.is_none()) {
+        layout_child(Size { width, height }, RunMode::ComputeSize).size.map(Some)
     } else {
         Size { width, height }
     };
 
-    let layout_output = tree.perform_child_layout(
-        node,
-        size,
-        grid_area_size.map(Option::Some),
-        grid_area_minus_item_margins_size.map(AvailableSpace::Definite),
-        SizingMode::InherentSize,
-        Line::FALSE,
-    );
+    let layout_output = layout_child(size, RunMode::PerformLayout);
 
     // Resolve final size
     let Size { width, height } = size.unwrap_or(layout_output.size).maybe_clamp(min_size, max_size);

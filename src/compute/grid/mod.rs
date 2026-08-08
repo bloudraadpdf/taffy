@@ -45,16 +45,18 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
     node: NodeId,
     inputs: LayoutInput,
 ) -> LayoutOutput {
-    let LayoutInput { known_dimensions, parent_size, available_space, run_mode, .. } = inputs;
+    let LayoutInput { known_dimensions, parent_size, inline_percentage_basis, available_space, run_mode, .. } = inputs;
 
     let style = tree.get_grid_container_style(node);
     let direction = style.direction();
+    let item_inline_axis = style.grid_item_inline_axis().absolute_axis();
 
     // 1. Compute "available grid space"
     // https://www.w3.org/TR/css-grid-1/#available-grid-space
     let aspect_ratio = style.aspect_ratio();
-    let padding = style.padding().resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
-    let border = style.border().resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
+    let edge_basis = inline_percentage_basis.resolve(parent_size);
+    let padding = style.padding().resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
+    let border = style.border().resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
     let padding_border = padding + border;
     let padding_border_size = padding_border.sum_axes();
     let box_sizing_adjustment =
@@ -306,6 +308,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
     track_sizing_algorithm(
         tree,
         AbstractAxis::Inline,
+        item_inline_axis,
         inner_min_size.get(AbstractAxis::Inline),
         inner_max_size.get(AbstractAxis::Inline),
         justify_content,
@@ -329,6 +332,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
     track_sizing_algorithm(
         tree,
         AbstractAxis::Block,
+        item_inline_axis,
         inner_min_size.get(AbstractAxis::Block),
         inner_max_size.get(AbstractAxis::Block),
         align_content,
@@ -423,8 +427,13 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
                     &|val, basis| tree.calc(val, basis),
                 );
                 let available_space = grid_area_size.with(AbstractAxis::Inline, None);
-                let new_min_content_contribution =
-                    item.min_content_contribution(AbstractAxis::Inline, tree, grid_area_size, available_space);
+                let new_min_content_contribution = item.min_content_contribution(
+                    AbstractAxis::Inline,
+                    tree,
+                    grid_area_size,
+                    item_inline_axis,
+                    available_space,
+                );
 
                 let has_changed = Some(new_min_content_contribution) != item.min_content_contribution_cache.width;
 
@@ -453,6 +462,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         track_sizing_algorithm(
             tree,
             AbstractAxis::Inline,
+            item_inline_axis,
             inner_min_size.get(AbstractAxis::Inline),
             inner_max_size.get(AbstractAxis::Inline),
             justify_content,
@@ -487,8 +497,13 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
                         &|val, basis| tree.calc(val, basis),
                     );
                     let available_space = grid_area_size.with(AbstractAxis::Block, None);
-                    let new_min_content_contribution =
-                        item.min_content_contribution(AbstractAxis::Block, tree, grid_area_size, available_space);
+                    let new_min_content_contribution = item.min_content_contribution(
+                        AbstractAxis::Block,
+                        tree,
+                        grid_area_size,
+                        item_inline_axis,
+                        available_space,
+                    );
 
                     let has_changed = Some(new_min_content_contribution) != item.min_content_contribution_cache.height;
 
@@ -515,6 +530,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
             track_sizing_algorithm(
                 tree,
                 AbstractAxis::Block,
+                item_inline_axis,
                 inner_min_size.get(AbstractAxis::Block),
                 inner_max_size.get(AbstractAxis::Block),
                 align_content,
@@ -614,6 +630,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
             item.node,
             index as u32,
             grid_area,
+            item_inline_axis,
             container_alignment_styles,
             item.baseline_shim,
             direction,
@@ -733,6 +750,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
                 child,
                 order,
                 grid_area,
+                item_inline_axis,
                 container_alignment_styles,
                 0.0,
                 direction,

@@ -10,6 +10,28 @@ use crate::sys::{DefaultCheapStr, Vec};
 use core::cmp::{max, min};
 use core::fmt::Debug;
 
+/// The physical axis that represents a grid containing block's logical inline size for percentage edge resolution
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum GridItemInlineAxis {
+    /// The containing block's logical inline size is its physical width
+    #[default]
+    Horizontal,
+    /// The containing block's logical inline size is its physical height
+    Vertical,
+}
+
+impl GridItemInlineAxis {
+    /// Return the corresponding physical axis
+    #[inline(always)]
+    pub(crate) const fn absolute_axis(self) -> AbsoluteAxis {
+        match self {
+            Self::Horizontal => AbsoluteAxis::Horizontal,
+            Self::Vertical => AbsoluteAxis::Vertical,
+        }
+    }
+}
+
 #[cfg(feature = "parse")]
 use crate::util::parse::{
     from_str_from_css, parse_css_str_entirely, CssParseResult, FromCss, ParseError, Parser, Token,
@@ -215,6 +237,12 @@ pub trait GridContainerStyle: CoreStyle {
     #[inline(always)]
     fn grid_auto_flow(&self) -> GridAutoFlow {
         Style::<Self::CustomIdent>::DEFAULT.grid_auto_flow
+    }
+
+    /// Physical axis that carries a grid area's logical inline size
+    #[inline(always)]
+    fn grid_item_inline_axis(&self) -> GridItemInlineAxis {
+        GridItemInlineAxis::Horizontal
     }
 
     /// How large should the gaps between items in a grid or flex container be?

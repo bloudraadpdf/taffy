@@ -22,6 +22,7 @@ use crate::compute::{
 };
 use crate::CacheTree;
 
+/// Resolve a calc value to zero when no resolver was provided
 fn zero_calc_value(_value: *const (), _basis: f32) -> f32 {
     0.0
 }
@@ -981,7 +982,7 @@ mod tests {
 
     use super::*;
     use crate::geometry::Rect;
-    use crate::style::{Dimension, Display, FlexDirection, LengthPercentage};
+    use crate::style::{AlignSelf, Dimension, Display, FlexDirection, GridItemInlineAxis, LengthPercentage};
     use crate::style_helpers::*;
     use crate::util::sys;
     use core::cell::{Cell, RefCell};
@@ -994,6 +995,91 @@ mod tests {
         _style: &Style,
     ) -> Size<f32> {
         known_dimensions.unwrap_or(node_context.cloned().unwrap_or(Size::ZERO))
+    }
+
+    #[cfg(feature = "grid")]
+    fn grid_with_children(taffy: &mut TaffyTree<()>, mut style: Style, children: &[NodeId]) -> NodeId {
+        style.display = Display::Grid;
+        taffy.new_with_children(style, children).unwrap()
+    }
+
+    #[cfg(feature = "grid")]
+    fn all_sides<T: Copy>(value: T) -> Rect<T> {
+        Rect { left: value, right: value, top: value, bottom: value }
+    }
+
+    #[cfg(feature = "grid")]
+    fn start_aligned_grid_item_style() -> Style {
+        Style {
+            size: Size::zero(),
+            justify_self: Some(AlignSelf::START),
+            align_self: Some(AlignSelf::START),
+            ..Default::default()
+        }
+    }
+
+    #[cfg(feature = "grid")]
+    fn grid_measurement_inputs(style: Style) -> Vec<MeasureInput> {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let child = taffy.new_leaf(Style::default()).unwrap();
+        let root = grid_with_children(&mut taffy, style, &[child]);
+        let observations = RefCell::new(Vec::new());
+
+        taffy
+            .compute_layout_with_measure_and_calc(
+                root,
+                Size::MAX_CONTENT,
+                |inputs, node, _, _| {
+                    if node == child {
+                        observations.borrow_mut().push(inputs);
+                    }
+                    Size::ZERO
+                },
+                |_, _| 0.0,
+            )
+            .unwrap();
+
+        observations.into_inner()
+    }
+
+    #[cfg(feature = "grid")]
+    fn single_cell_grid(
+        taffy: &mut TaffyTree<()>,
+        child_style: Style,
+        area_size: Size<f32>,
+        inline_axis: GridItemInlineAxis,
+    ) -> (NodeId, NodeId) {
+        let child = taffy.new_leaf(child_style).unwrap();
+        let root = grid_with_children(
+            taffy,
+            Style {
+                size: Size { width: length(400.0), height: length(300.0) },
+                grid_template_columns: vec![length(area_size.width)],
+                grid_template_rows: vec![length(area_size.height)],
+                grid_item_inline_axis: inline_axis,
+                ..Default::default()
+            },
+            &[child],
+        );
+        (root, child)
+    }
+
+    #[cfg(feature = "grid")]
+    fn layout_single_cell_grid(child_style: Style, inline_axis: GridItemInlineAxis) -> Layout {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let (root, child) = single_cell_grid(&mut taffy, child_style, Size { width: 100.0, height: 60.0 }, inline_axis);
+        taffy.compute_layout(root, Size::MAX_CONTENT).unwrap();
+        *taffy.layout(child).unwrap()
+    }
+
+    #[cfg(feature = "grid")]
+    fn percentage_edge_layout(inline_axis: GridItemInlineAxis) -> Layout {
+        let margin_percent: crate::LengthPercentageAuto = percent(0.1);
+        let padding_percent: LengthPercentage = percent(0.1);
+        let mut child_style = start_aligned_grid_item_style();
+        child_style.margin = all_sides(margin_percent);
+        child_style.padding = all_sides(padding_percent);
+        layout_single_cell_grid(child_style, inline_axis)
     }
 
     #[test]
@@ -1147,39 +1233,148 @@ mod tests {
     #[test]
     #[cfg(feature = "grid")]
     fn grid_measurement_receives_grid_area_context() {
+        let observations = grid_measurement_inputs(Style {
+            size: Size { width: length(400.0), height: auto() },
+            grid_template_columns: vec![length(100.0), length(300.0)],
+            ..Default::default()
+        });
+
+        assert!(observations.iter().any(|input| {
+            input.parent_size.width == Some(100.0)
+                && input.inline_percentage_basis.resolve(input.parent_size) == Some(100.0)
+        }));
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn vertical_grid_measurement_receives_logical_inline_area_height() {
+        let observations = grid_measurement_inputs(Style {
+            size: Size { width: length(400.0), height: length(300.0) },
+            grid_template_columns: vec![length(100.0)],
+            grid_template_rows: vec![length(60.0)],
+            grid_item_inline_axis: crate::GridItemInlineAxis::Vertical,
+            ..Default::default()
+        });
+
+        assert!(observations.iter().any(|input| {
+            input.parent_size == Size { width: Some(100.0), height: Some(60.0) }
+                && input.inline_percentage_basis.resolve(input.parent_size) == Some(60.0)
+        }));
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn horizontal_grid_area_resolves_all_percentage_edges() {
+        let layout = percentage_edge_layout(GridItemInlineAxis::Horizontal);
+        let expected = Rect { left: 10.0, right: 10.0, top: 10.0, bottom: 10.0 };
+        assert_eq!(layout.margin, expected);
+        assert_eq!(layout.padding, expected);
+    }
+
+    #[test]
+    #[cfg(all(feature = "grid", feature = "calc"))]
+    fn horizontal_grid_area_resolves_all_calc_padding() {
+        let calc_handle = core::ptr::without_provenance::<()>(16);
+        let calc = LengthPercentage::calc(calc_handle);
         let mut taffy: TaffyTree<()> = TaffyTree::new();
-        let child = taffy.new_leaf(Style::default()).unwrap();
-        let root = taffy
-            .new_with_children(
-                Style {
-                    display: Display::Grid,
-                    size: Size { width: length(400.0), height: auto() },
-                    grid_template_columns: vec![length(100.0), length(300.0)],
-                    ..Default::default()
-                },
-                &[child],
-            )
-            .unwrap();
-        let observations = RefCell::new(Vec::new());
+        let mut child_style = start_aligned_grid_item_style();
+        child_style.padding = all_sides(calc);
+        let (root, child) = single_cell_grid(
+            &mut taffy,
+            child_style,
+            Size { width: 100.0, height: 60.0 },
+            GridItemInlineAxis::Horizontal,
+        );
 
         taffy
             .compute_layout_with_measure_and_calc(
                 root,
                 Size::MAX_CONTENT,
-                |inputs, node, _, _| {
-                    if node == child {
-                        observations.borrow_mut().push(inputs);
-                    }
-                    Size::ZERO
+                |_, _, _, _| Size::ZERO,
+                |opaque, basis| {
+                    assert_eq!(opaque.addr(), calc_handle.addr());
+                    5.0 + basis * 0.1
                 },
-                |_, _| 0.0,
             )
             .unwrap();
 
-        assert!(observations.borrow().iter().any(|input| {
-            input.parent_size.width == Some(100.0)
-                && input.inline_percentage_basis.resolve(input.parent_size) == Some(100.0)
-        }));
+        assert_eq!(taffy.layout(child).unwrap().padding, Rect { left: 15.0, right: 15.0, top: 15.0, bottom: 15.0 });
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn vertical_grid_area_resolves_all_percentage_edges_from_height() {
+        let layout = percentage_edge_layout(GridItemInlineAxis::Vertical);
+        assert_eq!(layout.margin, Rect { left: 6.0, right: 6.0, top: 6.0, bottom: 6.0 });
+        assert_eq!(layout.padding, Rect { left: 6.0, right: 6.0, top: 6.0, bottom: 6.0 });
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn baseline_measurement_uses_each_items_grid_area() {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let first = taffy
+            .new_leaf(Style {
+                size: Size { width: length(10.0), height: length(20.0) },
+                margin: Rect { top: percent(0.1), ..Rect::zero() },
+                align_self: Some(AlignSelf::BASELINE),
+                ..Default::default()
+            })
+            .unwrap();
+        let second = taffy
+            .new_leaf(Style {
+                size: Size { width: length(10.0), height: length(20.0) },
+                align_self: Some(AlignSelf::BASELINE),
+                ..Default::default()
+            })
+            .unwrap();
+        let root = taffy
+            .new_with_children(
+                Style {
+                    display: Display::Grid,
+                    size: Size { width: length(400.0), height: auto() },
+                    grid_template_columns: vec![length(100.0), length(100.0)],
+                    grid_template_rows: vec![auto()],
+                    ..Default::default()
+                },
+                &[first, second],
+            )
+            .unwrap();
+
+        taffy.compute_layout(root, Size::MAX_CONTENT).unwrap();
+
+        assert_eq!(taffy.layout(second).unwrap().location.y, 10.0);
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn flexible_track_max_content_uses_opposite_axis_grid_area() {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let child = taffy
+            .new_leaf(Style {
+                size: Size::zero(),
+                padding: Rect { left: percent(0.1), right: percent(0.1), ..Rect::zero() },
+                justify_self: Some(AlignSelf::START),
+                align_self: Some(AlignSelf::START),
+                ..Default::default()
+            })
+            .unwrap();
+        let root = taffy
+            .new_with_children(
+                Style {
+                    display: Display::Grid,
+                    grid_template_columns: vec![fr(1.0)],
+                    grid_template_rows: vec![length(100.0)],
+                    grid_item_inline_axis: GridItemInlineAxis::Vertical,
+                    ..Default::default()
+                },
+                &[child],
+            )
+            .unwrap();
+
+        taffy.compute_layout(root, Size::MAX_CONTENT).unwrap();
+
+        assert_eq!(taffy.layout(root).unwrap().size.width, 20.0);
     }
 
     #[test]

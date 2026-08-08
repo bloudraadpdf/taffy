@@ -340,15 +340,16 @@ pub fn compute_block_layout(
     inputs: LayoutInput,
     block_ctx: Option<&mut BlockContext<'_>>,
 ) -> LayoutOutput {
-    let LayoutInput { known_dimensions, parent_size, run_mode, .. } = inputs;
+    let LayoutInput { known_dimensions, parent_size, inline_percentage_basis, run_mode, .. } = inputs;
     let style = tree.get_block_container_style(node_id);
 
     // Pull these out earlier to avoid borrowing issues
     let overflow = style.overflow();
     let is_scroll_container = overflow.x.is_scroll_container() || overflow.y.is_scroll_container();
     let aspect_ratio = style.aspect_ratio();
-    let padding = style.padding().resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
-    let border = style.border().resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
+    let edge_basis = inline_percentage_basis.resolve(parent_size);
+    let padding = style.padding().resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
+    let border = style.border().resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
     let padding_border_size = (padding + border).sum_axes();
     let box_sizing_adjustment =
         if style.box_sizing() == BoxSizing::ContentBox { padding_border_size } else { Size::ZERO };
@@ -430,7 +431,13 @@ fn compute_inner(
     #[allow(unused_mut)] mut block_ctx: &mut BlockContext<'_>,
 ) -> LayoutOutput {
     let LayoutInput {
-        known_dimensions, parent_size, available_space, run_mode, vertical_margins_are_collapsible, ..
+        known_dimensions,
+        parent_size,
+        inline_percentage_basis,
+        available_space,
+        run_mode,
+        vertical_margins_are_collapsible,
+        ..
     } = inputs;
 
     let style = tree.get_block_container_style(node_id);
@@ -438,8 +445,9 @@ fn compute_inner(
     let raw_border = style.border();
     let raw_margin = style.margin();
     let aspect_ratio = style.aspect_ratio();
-    let padding = raw_padding.resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
-    let border = raw_border.resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
+    let edge_basis = inline_percentage_basis.resolve(parent_size);
+    let padding = raw_padding.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
+    let border = raw_border.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
     let direction = style.direction();
 
     // Scrollbar gutters are reserved when the `overflow` property is set to `Overflow::Scroll`.
@@ -556,11 +564,12 @@ fn compute_inner(
     // (`parent_size`), not the box's own width. These only differ when the box has a
     // non-stretch width. Fall back to the box's own width when the parent size is
     // unknown (e.g. at the root of the layout tree).
-    let percentage_resolution_width = parent_size.width.unwrap_or(container_outer_width);
-    let resolved_padding =
-        raw_padding.resolve_or_zero(Some(percentage_resolution_width), |val, basis| tree.calc(val, basis));
-    let resolved_border =
-        raw_border.resolve_or_zero(Some(percentage_resolution_width), |val, basis| tree.calc(val, basis));
+    let final_edge_basis = match inline_percentage_basis {
+        InlinePercentageBasis::ParentWidth => parent_size.width.or(Some(container_outer_width)),
+        InlinePercentageBasis::Explicit(value) => value,
+    };
+    let resolved_padding = raw_padding.resolve_or_zero(final_edge_basis, |val, basis| tree.calc(val, basis));
+    let resolved_border = raw_border.resolve_or_zero(final_edge_basis, |val, basis| tree.calc(val, basis));
     let resolved_content_box_inset = resolved_padding + resolved_border + scrollbar_gutter;
     #[cfg_attr(not(feature = "content_size"), allow(unused_mut))]
     let (
@@ -677,14 +686,13 @@ fn compute_inner(
         top_margin: if own_margins_collapse_with_children.start {
             first_child_top_margin_set
         } else {
-            let margin_top = raw_margin.top.resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
+            let margin_top = raw_margin.top.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
             CollapsibleMarginSet::from_margin(margin_top)
         },
         bottom_margin: if own_bottom_margin_collapses_with_children {
             last_child_bottom_margin_set
         } else {
-            let margin_bottom =
-                raw_margin.bottom.resolve_or_zero(parent_size.width, |val, basis| tree.calc(val, basis));
+            let margin_bottom = raw_margin.bottom.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
             CollapsibleMarginSet::from_margin(margin_bottom)
         },
         margins_can_collapse_through: can_be_collapsed_through,

@@ -31,8 +31,9 @@ pub use self::float::{Clear, Float, FloatDirection};
 #[cfg(feature = "grid")]
 pub use self::grid::{
     GenericGridPlacement, GenericGridTemplateComponent, GenericRepetition, GridAutoFlow, GridAutoTracks,
-    GridContainerStyle, GridItemStyle, GridPlacement, GridTemplateComponent, GridTemplateRepetition,
-    GridTemplateTracks, MaxTrackSizingFunction, MinTrackSizingFunction, RepetitionCount, TrackSizingFunction,
+    GridContainerStyle, GridItemInlineAxis, GridItemStyle, GridPlacement, GridTemplateComponent,
+    GridTemplateRepetition, GridTemplateTracks, MaxTrackSizingFunction, MinTrackSizingFunction, RepetitionCount,
+    TrackSizingFunction,
 };
 #[cfg(feature = "grid")]
 pub(crate) use self::grid::{GridAreaAxis, GridAreaEnd};
@@ -574,6 +575,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Controls how items get placed into the grid for auto-placed items
     #[cfg(feature = "grid")]
     pub grid_auto_flow: GridAutoFlow,
+    /// Physical axis that carries each grid area's logical inline size
+    #[cfg(feature = "grid")]
+    pub grid_item_inline_axis: GridItemInlineAxis,
 
     // Grid container named properties
     /// Defines the rectangular grid areas
@@ -665,6 +669,8 @@ impl<S: CheapCloneStr> Style<S> {
         grid_auto_columns: GridTrackVec::new(),
         #[cfg(feature = "grid")]
         grid_auto_flow: GridAutoFlow::Row,
+        #[cfg(feature = "grid")]
+        grid_item_inline_axis: GridItemInlineAxis::Horizontal,
         #[cfg(feature = "grid")]
         grid_row: Line { start: GridPlacement::<S>::Auto, end: GridPlacement::<S>::Auto },
         #[cfg(feature = "grid")]
@@ -1034,6 +1040,10 @@ impl<S: CheapCloneStr> GridContainerStyle for Style<S> {
         self.grid_auto_flow
     }
     #[inline(always)]
+    fn grid_item_inline_axis(&self) -> GridItemInlineAxis {
+        self.grid_item_inline_axis
+    }
+    #[inline(always)]
     fn gap(&self) -> Size<LengthPercentage> {
         self.gap
     }
@@ -1154,6 +1164,10 @@ impl<T: GridContainerStyle> GridContainerStyle for &'_ T {
     #[inline(always)]
     fn grid_auto_flow(&self) -> GridAutoFlow {
         (*self).grid_auto_flow()
+    }
+    #[inline(always)]
+    fn grid_item_inline_axis(&self) -> GridItemInlineAxis {
+        (*self).grid_item_inline_axis()
     }
     #[inline(always)]
     fn gap(&self) -> Size<LengthPercentage> {
@@ -1295,6 +1309,8 @@ mod tests {
             grid_auto_columns: Default::default(),
             #[cfg(feature = "grid")]
             grid_auto_flow: Default::default(),
+            #[cfg(feature = "grid")]
+            grid_item_inline_axis: Default::default(),
             #[cfg(feature = "grid")]
             grid_row: Line { start: GridPlacement::Auto, end: GridPlacement::Auto },
             #[cfg(feature = "grid")]
