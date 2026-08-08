@@ -303,7 +303,7 @@ impl GridItem {
         let aspect_ratio = self.aspect_ratio;
         // CSS resolves percentage padding and border against the inline size of the containing
         // block. For a grid item under intrinsic measurement, that inline-size basis is the grid
-        // area's width when it is definite.
+        // area's logical inline size when it is definite.
         // Spec:
         // https://www.w3.org/TR/css-grid-1/#item-margins
         // https://www.w3.org/TR/CSS22/box.html#padding-properties
@@ -720,6 +720,7 @@ mod tests {
         let area = Size { width: None, height: Some(80.0) };
 
         assert_eq!(preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MinContent, false), area);
+        assert_eq!(preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MaxContent, false), area);
         assert_eq!(preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MaxContent, true), area);
         assert_eq!(
             preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MinContent, true),
@@ -740,9 +741,28 @@ mod tests {
 
     #[test]
     fn cyclic_minimum_and_edge_bases_are_axis_correct() {
-        assert_eq!(minimum_size_basis(Size::NONE, AbstractAxis::Block), Size { width: None, height: Some(0.0) });
-        assert_eq!(inline_percentage_basis(Size::NONE, AbsoluteAxis::Horizontal, AbstractAxis::Inline), Some(0.0));
+        let minimum_basis = minimum_size_basis(Size::NONE, AbstractAxis::Block);
+        let edge_basis = inline_percentage_basis(Size::NONE, AbsoluteAxis::Horizontal, AbstractAxis::Inline);
+
+        assert_eq!(minimum_basis, Size { width: None, height: Some(0.0) });
+        assert_eq!(Dimension::percent(0.5).maybe_resolve(minimum_basis.height, |_, _| 0.0), Some(0.0));
+        assert_eq!(edge_basis, Some(0.0));
+        assert_eq!(LengthPercentageAuto::percent(0.5).resolve_or_zero(edge_basis, |_, _| 0.0), 0.0);
+        assert_eq!(LengthPercentage::percent(0.5).resolve_or_zero(edge_basis, |_, _| 0.0), 0.0);
         assert_eq!(inline_percentage_basis(Size::NONE, AbsoluteAxis::Vertical, AbstractAxis::Inline), None);
+    }
+
+    #[test]
+    #[cfg(feature = "calc")]
+    fn cyclic_replaced_preferred_size_preserves_calc_fixed_term() {
+        let handle = core::ptr::without_provenance::<()>(32);
+        let basis = preferred_size_basis(Size::NONE, AbstractAxis::Inline, IntrinsicContribution::MinContent, true);
+        let value = Dimension::calc(handle).maybe_resolve(basis.width, |opaque, basis| {
+            assert_eq!(opaque.addr(), handle.addr());
+            5.0 + basis * 0.1
+        });
+
+        assert_eq!(value, Some(5.0));
     }
 
     #[test]
