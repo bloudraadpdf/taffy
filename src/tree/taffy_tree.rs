@@ -309,6 +309,7 @@ where
         compute_cached_layout(self, node_id, inputs, |tree, node_id, inputs| {
             let display_mode = tree.taffy.nodes[node_id.into()].style.display;
             let has_children = tree.child_count(node_id) > 0;
+            let is_measured_leaf = !has_children && tree.taffy.nodes[node_id.into()].has_context;
 
             debug_log!(display_mode);
             debug_log_node!(inputs);
@@ -324,6 +325,8 @@ where
                 (Display::Flex, true) => compute_flexbox_layout(tree, node_id, inputs),
                 #[cfg(feature = "grid")]
                 (Display::Grid, true) => compute_grid_layout(tree, node_id, inputs),
+                #[cfg(feature = "grid")]
+                (Display::Grid, false) if !is_measured_leaf => compute_grid_layout(tree, node_id, inputs),
                 (_, false) => {
                     let node_key = node_id.into();
                     let style = &tree.taffy.nodes[node_key].style;
@@ -1124,6 +1127,32 @@ mod tests {
 
         // node should be in the taffy tree and have no children
         assert!(taffy.child_count(node) == 0);
+    }
+
+    #[cfg(all(feature = "grid", feature = "detailed_layout_info"))]
+    #[test]
+    fn childless_grid_retains_explicit_track_layout_information() {
+        let mut taffy: TaffyTree<()> = TaffyTree::new();
+        let grid = taffy
+            .new_leaf(Style {
+                display: Display::Grid,
+                size: Size { width: length(120.0), height: length(120.0) },
+                grid_template_columns: vec![length(100.0); 3],
+                grid_template_rows: vec![length(100.0); 6],
+                gap: Size { width: length(10.0), height: length(10.0) },
+                ..Default::default()
+            })
+            .unwrap();
+
+        taffy.compute_layout(grid, Size::MAX_CONTENT).unwrap();
+
+        let DetailedLayoutInfo::Grid(info) = taffy.detailed_layout_info(grid) else {
+            panic!("childless explicit grid must retain its track layout");
+        };
+        assert_eq!(info.columns.sizes, [100.0; 3]);
+        assert_eq!(info.columns.gutters, [0.0, 10.0, 10.0, 0.0]);
+        assert_eq!(info.rows.sizes, [100.0; 6]);
+        assert_eq!(info.rows.gutters, [0.0, 10.0, 10.0, 10.0, 10.0, 10.0, 0.0]);
     }
 
     /// Test that new_with_children works as expected
