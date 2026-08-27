@@ -897,6 +897,8 @@ pub struct DetailedGridTracksInfo {
     pub gutters: Vec<f32>,
     /// The used size of the tracks
     pub sizes: Vec<f32>,
+    /// Whether each track was collapsed by `repeat(auto-fit, ...)`
+    pub collapsed: Vec<bool>,
 }
 
 #[cfg(feature = "detailed_layout_info")]
@@ -923,6 +925,14 @@ impl DetailedGridTracksInfo {
         DetailedGridTracksInfo::grid_track_base_size_of_kind(grid_tracks, GridTrackKind::Track)
     }
 
+    /// Get the resolved collapsed state of each track
+    fn collapsed_from_grid_track_layout(grid_tracks: &[GridTrack]) -> Vec<bool> {
+        grid_tracks
+            .iter()
+            .filter_map(|track| (track.kind == GridTrackKind::Track).then_some(track.is_collapsed))
+            .collect()
+    }
+
     /// Construct DetailedGridTracksInfo from TrackCounts and GridTracks
     fn from_grid_tracks_and_track_count(track_count: TrackCounts, grid_tracks: Vec<GridTrack>) -> Self {
         DetailedGridTracksInfo {
@@ -931,7 +941,27 @@ impl DetailedGridTracksInfo {
             positive_implicit_tracks: track_count.positive_implicit,
             gutters: DetailedGridTracksInfo::gutters_from_grid_track_layout(&grid_tracks),
             sizes: DetailedGridTracksInfo::sizes_from_grid_track_layout(&grid_tracks),
+            collapsed: DetailedGridTracksInfo::collapsed_from_grid_track_layout(&grid_tracks),
         }
+    }
+}
+
+#[cfg(all(test, feature = "detailed_layout_info"))]
+mod detailed_grid_tracks_info_tests {
+    use super::{DetailedGridTracksInfo, GridTrack};
+    use crate::{
+        style::{MaxTrackSizingFunction, MinTrackSizingFunction},
+        style_helpers::TaffyAuto,
+    };
+
+    #[test]
+    fn preserves_resolved_collapsed_track_identity() {
+        let track = || GridTrack::new(MinTrackSizingFunction::AUTO, MaxTrackSizingFunction::AUTO);
+        let mut collapsed = track();
+        collapsed.collapse();
+        let tracks = [track(), collapsed];
+
+        assert_eq!(DetailedGridTracksInfo::collapsed_from_grid_track_layout(&tracks), [false, true]);
     }
 }
 
