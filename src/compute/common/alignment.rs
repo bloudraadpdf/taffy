@@ -30,12 +30,14 @@ pub(crate) fn apply_alignment_fallback(
     let mut is_safe = matches!(alignment_mode.safety, AlignmentSafety::Safe);
 
     // 1. If there is only a single item being aligned or the items overflow the container, the
-    //    distributed alignment keywords (`stretch`, `space-*`) fall back to a positional keyword
-    //    and gain implicit `safe` semantics so step 2 can flip them to `Start` on overflow.
+    //    distributed alignment keywords (`stretch`, `space-*`) fall back to a positional keyword.
+    //    The `space-*` fallbacks gain implicit `safe` semantics; `stretch` remains the unsafe
+    //    `flex-start` fallback required by CSS Flexbox §8.4.
     //    https://www.w3.org/TR/css-align-3/#distribution-values
     if num_items <= 1 || free_space <= 0.0 {
         (keyword, is_safe) = match keyword {
-            AlignContentKeyword::Stretch | AlignContentKeyword::SpaceBetween => (AlignContentKeyword::FlexStart, true),
+            AlignContentKeyword::Stretch => (AlignContentKeyword::FlexStart, false),
+            AlignContentKeyword::SpaceBetween => (AlignContentKeyword::FlexStart, true),
             AlignContentKeyword::SpaceAround | AlignContentKeyword::SpaceEvenly => (AlignContentKeyword::Center, true),
             other => (other, is_safe),
         };
@@ -113,5 +115,20 @@ pub(crate) fn compute_alignment_offset(
             AlignContentKeyword::SpaceAround => free_space / num_items as f32,
             AlignContentKeyword::SpaceEvenly => free_space / (num_items + 1) as f32,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overflowing_stretch_falls_back_to_unsafe_flex_start() {
+        assert_eq!(apply_alignment_fallback(-20.0, 1, AlignContent::STRETCH), AlignContentKeyword::FlexStart,);
+    }
+
+    #[test]
+    fn overflowing_space_between_falls_back_to_safe_start() {
+        assert_eq!(apply_alignment_fallback(-20.0, 2, AlignContent::SPACE_BETWEEN), AlignContentKeyword::Start,);
     }
 }
