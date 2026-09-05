@@ -322,9 +322,11 @@ pub(super) fn track_sizing_algorithm<Tree: LayoutPartialTree>(
         );
     }
 
-    // If all tracks have base_size = growth_limit, then skip the rest of this function.
-    // Note: this can only happen both track sizing function have the same fixed track sizing function
-    if axis_tracks.iter().all(|track| track.base_size == track.growth_limit) {
+    if axis_tracks.iter().all(|track| {
+        !track.has_intrinsic_sizing_function()
+            && !(percentage_basis.is_none() && track.uses_percentage())
+            && track.base_size == track.growth_limit
+    }) {
         return;
     }
 
