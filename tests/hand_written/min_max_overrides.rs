@@ -4,6 +4,46 @@ mod min_max_overrides {
     use taffy_test_helpers::new_test_tree;
 
     #[test]
+    #[cfg(feature = "calc")]
+    fn fit_content_calculation_keeps_its_limit_and_intrinsic_minimum() {
+        static LIMIT: f64 = 0.0;
+        let handle = core::ptr::addr_of!(LIMIT).cast();
+        for (width, minimum, expected) in [(200.0, 10.0, 70.0), (100.0, 10.0, 45.0), (100.0, 80.0, 80.0)] {
+            let mut tree: TaffyTree<()> = TaffyTree::new();
+            let child = tree.new_leaf(Style::default()).unwrap();
+            let grid = tree
+                .new_with_children(
+                    Style {
+                        display: Display::Grid,
+                        size: Size { width: length(width), height: auto() },
+                        grid_template_columns: vec![GridTemplateComponent::Single(fit_content(
+                            LengthPercentage::calc(handle),
+                        ))],
+                        ..Default::default()
+                    },
+                    &[child],
+                )
+                .unwrap();
+            tree.compute_layout_with_measure_and_calc(
+                grid,
+                Size::MAX_CONTENT,
+                |input, _, _, _| Size {
+                    width: input.known_dimensions.width.unwrap_or(
+                        if input.available_space.width == AvailableSpace::MinContent { minimum } else { 300.0 },
+                    ),
+                    height: input.known_dimensions.height.unwrap_or(10.0),
+                },
+                |actual, basis| {
+                    assert_eq!(actual, handle);
+                    20.0 + basis * 0.25
+                },
+            )
+            .unwrap();
+            assert_eq!(tree.layout(child).unwrap().size.width, expected);
+        }
+    }
+
+    #[test]
     fn intrinsic_track_minimum_can_grow_past_an_initial_zero_growth_limit() {
         for minimum in
             [MinTrackSizingFunction::AUTO, MinTrackSizingFunction::MIN_CONTENT, MinTrackSizingFunction::MAX_CONTENT]

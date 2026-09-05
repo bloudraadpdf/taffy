@@ -44,6 +44,8 @@ pub(in super::super) struct GridTrack {
     /// Note: can be infinity
     pub growth_limit: f32,
 
+    pub fit_content_calc_limit: f32,
+
     /// A temporary scratch value when sizing tracks. Is used as an additional amount to add to the
     /// estimate for the available space in the opposite axis when content sizing items
     pub content_alignment_adjustment: f32,
@@ -74,6 +76,7 @@ impl GridTrack {
             offset: 0.0,
             base_size: 0.0,
             growth_limit: 0.0,
+            fit_content_calc_limit: f32::INFINITY,
             content_alignment_adjustment: 0.0,
             item_incurred_increase: 0.0,
             base_size_planned_increase: 0.0,
@@ -134,6 +137,7 @@ impl GridTrack {
                 Some(space) => space * self.max_track_sizing_function.0.value(),
                 None => f32::INFINITY,
             },
+            CompactLength::FIT_CONTENT_CALC_TAG => self.fit_content_calc_limit,
             _ => f32::INFINITY,
         }
     }

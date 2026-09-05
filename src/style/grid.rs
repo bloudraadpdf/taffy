@@ -1049,6 +1049,8 @@ impl MaxTrackSizingFunction {
         match self.0.tag() {
             CompactLength::FIT_CONTENT_PX_TAG => Some(self.0.value()),
             CompactLength::FIT_CONTENT_PERCENT_TAG => parent_size.map(|size| self.0.value() * size),
+            #[cfg(feature = "calc")]
+            CompactLength::FIT_CONTENT_CALC_TAG => parent_size.map(|size| calc_resolver(self.0.calc_value(), size)),
             _ => self.definite_value(parent_size, calc_resolver),
         }
     }

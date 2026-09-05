@@ -450,6 +450,13 @@ fn initialize_track_sizes(
     axis_inner_node_size: Option<f32>,
 ) {
     for track in axis_tracks.iter_mut() {
+        #[cfg(feature = "calc")]
+        if track.max_track_sizing_function.0.tag() == CompactLength::FIT_CONTENT_CALC_TAG {
+            track.fit_content_calc_limit = track
+                .max_track_sizing_function
+                .definite_limit(axis_inner_node_size, |value, basis| tree.calc(value, basis))
+                .unwrap_or(f32::INFINITY);
+        }
         // For each track, if the track’s min track sizing function is:
         // - A fixed sizing function
         //     Resolve to an absolute length and use that size as the track’s initial base size.

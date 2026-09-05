@@ -37,6 +37,18 @@ mod compat {
     pub fn tag_ptr(ptr: *const (), tag: usize) -> *const () {
         (ptr as usize | tag) as *const ()
     }
+
+    #[inline(always)]
+    #[cfg(all(feature = "calc", feature = "strict_provenance"))]
+    pub fn untag_calc_ptr(ptr: *const ()) -> *const () {
+        ptr.map_addr(|address| address & !0b111)
+    }
+
+    #[inline(always)]
+    #[cfg(all(feature = "calc", not(feature = "strict_provenance")))]
+    pub fn untag_calc_ptr(ptr: *const ()) -> *const () {
+        (ptr as usize & !0b111) as *const ()
+    }
 }
 
 #[cfg(not(any(target_pointer_width = "32", target_pointer_width = "64")))]
@@ -213,6 +225,8 @@ impl CompactLength {
     /// The tag indicating a calc() value
     #[cfg(feature = "calc")]
     pub const CALC_TAG: usize = 0b000;
+    /// The tag indicating a fit-content value with a calculation limit.
+    pub const FIT_CONTENT_CALC_TAG: usize = 0b101;
     /// The tag indicating a length value
     pub const LENGTH_TAG: usize = 0b0000_0001;
     /// The tag indicating a percentage value
@@ -319,6 +333,10 @@ impl CompactLength {
     /// Get the primary tag
     #[inline(always)]
     pub fn tag(self) -> usize {
+        #[cfg(feature = "calc")]
+        if matches!(self.0.calc_tag(), Self::CALC_TAG | Self::FIT_CONTENT_CALC_TAG) {
+            return self.0.calc_tag();
+        }
         self.0.tag()
     }
 
@@ -333,7 +351,7 @@ impl CompactLength {
     #[inline(always)]
     #[cfg(feature = "calc")]
     pub fn calc_value(self) -> *const () {
-        self.0.ptr()
+        compat::untag_calc_ptr(self.0.ptr())
     }
 
     /// Returns true if the value is 0 px
@@ -376,13 +394,13 @@ impl CompactLength {
     /// Returns true if the value is a fit-content(...) value
     #[inline(always)]
     pub fn is_fit_content(self) -> bool {
-        matches!(self.tag(), Self::FIT_CONTENT_PX_TAG | Self::FIT_CONTENT_PERCENT_TAG)
+        matches!(self.tag(), Self::FIT_CONTENT_PX_TAG | Self::FIT_CONTENT_PERCENT_TAG | Self::FIT_CONTENT_CALC_TAG)
     }
 
     /// Returns true if the value is max-content or a fit-content(...) value
     #[inline(always)]
     pub fn is_max_or_fit_content(self) -> bool {
-        matches!(self.tag(), Self::MAX_CONTENT_TAG | Self::FIT_CONTENT_PX_TAG | Self::FIT_CONTENT_PERCENT_TAG)
+        self.is_max_content() || self.is_fit_content()
     }
 
     /// Returns true if the max track sizing function is `MaxContent`, `FitContent` or `Auto` else false.
@@ -396,6 +414,7 @@ impl CompactLength {
                 | CompactLength::MAX_CONTENT_TAG
                 | CompactLength::FIT_CONTENT_PX_TAG
                 | CompactLength::FIT_CONTENT_PERCENT_TAG
+                | CompactLength::FIT_CONTENT_CALC_TAG
         )
     }
 
@@ -415,6 +434,7 @@ impl CompactLength {
                 | Self::MAX_CONTENT_TAG
                 | Self::FIT_CONTENT_PX_TAG
                 | Self::FIT_CONTENT_PERCENT_TAG
+                | Self::FIT_CONTENT_CALC_TAG
         )
     }
 
@@ -429,7 +449,12 @@ impl CompactLength {
     pub fn uses_percentage(self) -> bool {
         #[cfg(feature = "calc")]
         {
-            matches!(self.tag(), CompactLength::PERCENT_TAG | CompactLength::FIT_CONTENT_PERCENT_TAG) || self.is_calc()
+            matches!(
+                self.tag(),
+                CompactLength::PERCENT_TAG
+                    | CompactLength::FIT_CONTENT_PERCENT_TAG
+                    | CompactLength::FIT_CONTENT_CALC_TAG
+            ) || self.is_calc()
         }
         #[cfg(not(feature = "calc"))]
         {
@@ -487,6 +512,8 @@ impl TaffyFitContent for CompactLength {
         match lp.0.tag() {
             Self::LENGTH_TAG => Self::fit_content_px(value),
             Self::PERCENT_TAG => Self::fit_content_percent(value),
+            #[cfg(feature = "calc")]
+            _ if lp.0.is_calc() => Self(CompactLengthInner::from_ptr(lp.0.calc_value(), Self::FIT_CONTENT_CALC_TAG)),
             _ => unreachable!(),
         }
     }
@@ -500,7 +527,7 @@ impl serde::Serialize for CompactLength {
     {
         #[cfg(feature = "calc")]
         {
-            if self.tag() == Self::CALC_TAG {
+            if matches!(self.tag(), Self::CALC_TAG | Self::FIT_CONTENT_CALC_TAG) {
                 Err(serde::ser::Error::custom("Cannot serialize Calc value"))
             } else {
                 serializer.serialize_u64(self.0.serialized())
