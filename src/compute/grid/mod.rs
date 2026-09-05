@@ -769,8 +769,16 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
     tree.set_detailed_grid_info(
         node,
         DetailedGridInfo {
-            rows: DetailedGridTracksInfo::from_grid_tracks_and_track_count(final_row_counts, rows),
-            columns: DetailedGridTracksInfo::from_grid_tracks_and_track_count(final_col_counts, columns),
+            rows: DetailedGridTracksInfo::from_grid_tracks_and_track_count(
+                final_row_counts,
+                row_auto_repetition_count,
+                rows,
+            ),
+            columns: DetailedGridTracksInfo::from_grid_tracks_and_track_count(
+                final_col_counts,
+                col_auto_repetition_count,
+                columns,
+            ),
             items: items.iter().map(DetailedGridItemsInfo::from_grid_item).collect(),
         },
     );
@@ -890,6 +898,8 @@ pub struct DetailedGridTracksInfo {
     pub negative_implicit_tracks: u16,
     /// Number of explicit grid tracks
     pub explicit_tracks: u16,
+    /// Resolved auto-repeat count, including a partly retained final repetition; zero if absent or fully truncated
+    pub auto_repetition_count: u16,
     /// Number of trailing implicit grid tracks
     pub positive_implicit_tracks: u16,
 
@@ -934,10 +944,15 @@ impl DetailedGridTracksInfo {
     }
 
     /// Construct DetailedGridTracksInfo from TrackCounts and GridTracks
-    fn from_grid_tracks_and_track_count(track_count: TrackCounts, grid_tracks: Vec<GridTrack>) -> Self {
+    fn from_grid_tracks_and_track_count(
+        track_count: TrackCounts,
+        auto_repetition_count: u16,
+        grid_tracks: Vec<GridTrack>,
+    ) -> Self {
         DetailedGridTracksInfo {
             negative_implicit_tracks: track_count.negative_implicit,
             explicit_tracks: track_count.explicit,
+            auto_repetition_count,
             positive_implicit_tracks: track_count.positive_implicit,
             gutters: DetailedGridTracksInfo::gutters_from_grid_track_layout(&grid_tracks),
             sizes: DetailedGridTracksInfo::sizes_from_grid_track_layout(&grid_tracks),
@@ -962,6 +977,69 @@ mod detailed_grid_tracks_info_tests {
         let tracks = [track(), collapsed];
 
         assert_eq!(DetailedGridTracksInfo::collapsed_from_grid_track_layout(&tracks), [false, true]);
+    }
+
+    #[cfg(feature = "taffy_tree")]
+    #[test]
+    fn preserves_auto_repetition_count_through_collapsing_and_clamping() {
+        use crate::{
+            geometry::Size,
+            style::{Display, RepetitionCount, Style},
+            style_helpers::{length, repeat, TaffyMaxContent},
+            tree::DetailedLayoutInfo,
+            TaffyTree,
+        };
+        use RepetitionCount::{AutoFill, AutoFit, Count};
+
+        for columns in [true, false] {
+            for (template, repetitions, explicit_tracks, collapsed) in [
+                (vec![repeat(Count(4), vec![length(2.0)])], 0, 4, false),
+                (vec![repeat(AutoFill, vec![length(20.0)])], 5, 5, false),
+                (vec![repeat(AutoFit, vec![length(20.0)])], 5, 5, true),
+                (
+                    vec![repeat(AutoFill, vec![length(2.0)]), repeat(Count(10_000), vec![length(37.0)])],
+                    1,
+                    10_000,
+                    false,
+                ),
+                (
+                    vec![repeat(Count(10_000), vec![length(37.0)]), repeat(AutoFill, vec![length(2.0)])],
+                    0,
+                    10_000,
+                    false,
+                ),
+                (
+                    vec![repeat(Count(9_999), vec![length(1.0)]), repeat(AutoFill, vec![length(2.0), length(3.0)])],
+                    1,
+                    10_000,
+                    false,
+                ),
+            ] {
+                let mut style = Style {
+                    display: Display::Grid,
+                    size: Size { width: length(100.0), height: length(100.0) },
+                    grid_template_columns: vec![length(10.0)],
+                    grid_template_rows: vec![length(10.0)],
+                    ..Default::default()
+                };
+                if columns {
+                    style.grid_template_columns = template;
+                } else {
+                    style.grid_template_rows = template;
+                }
+                let mut tree: TaffyTree<()> = TaffyTree::new();
+                let grid = tree.new_leaf(style).unwrap();
+                tree.compute_layout(grid, Size::MAX_CONTENT).unwrap();
+                let DetailedLayoutInfo::Grid(info) = tree.detailed_layout_info(grid) else {
+                    panic!("the grid must retain its detailed track information");
+                };
+                let (tracks, other) = if columns { (&info.columns, &info.rows) } else { (&info.rows, &info.columns) };
+                assert_eq!(tracks.auto_repetition_count, repetitions);
+                assert_eq!(tracks.explicit_tracks, explicit_tracks);
+                assert!(tracks.collapsed.iter().all(|value| *value == collapsed));
+                assert_eq!(other.auto_repetition_count, 0);
+            }
+        }
     }
 }
 
