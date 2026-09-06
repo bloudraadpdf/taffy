@@ -1000,6 +1000,56 @@ mod tests {
         known_dimensions.unwrap_or(node_context.cloned().unwrap_or(Size::ZERO))
     }
 
+    #[test]
+    fn flex_line_baseline_size_excludes_items_with_auto_cross_margins() {
+        for (auto_top, auto_bottom) in [(true, false), (false, true), (true, true)] {
+            for additional_participant in [false, true] {
+                let mut taffy: TaffyTree<()> = TaffyTree::new();
+                let text = taffy
+                    .new_leaf(Style {
+                        size: Size { width: length(10.0), height: length(10.0) },
+                        margin: Rect { bottom: length(20.0), ..Rect::zero() },
+                        ..Default::default()
+                    })
+                    .unwrap();
+                let other = taffy
+                    .new_leaf(Style {
+                        size: Size { width: length(10.0), height: length(30.0) },
+                        margin: Rect {
+                            top: if auto_top { auto() } else { length(0.0) },
+                            bottom: if auto_bottom { auto() } else { length(0.0) },
+                            ..Rect::zero()
+                        },
+                        ..Default::default()
+                    })
+                    .unwrap();
+                let mut children = vec![text, other];
+                if additional_participant {
+                    children.push(
+                        taffy
+                            .new_leaf(Style {
+                                size: Size { width: length(10.0), height: length(20.0) },
+                                ..Default::default()
+                            })
+                            .unwrap(),
+                    );
+                }
+                let root = taffy
+                    .new_with_children(
+                        Style {
+                            align_items: Some(AlignSelf::BASELINE),
+                            size: Size { width: length(30.0), height: auto() },
+                            ..Default::default()
+                        },
+                        &children,
+                    )
+                    .unwrap();
+                taffy.compute_layout(root, Size::MAX_CONTENT).unwrap();
+                assert_eq!(taffy.layout(root).unwrap().size.height, if additional_participant { 40.0 } else { 30.0 });
+            }
+        }
+    }
+
     #[cfg(feature = "grid")]
     fn grid_with_children(taffy: &mut TaffyTree<()>, mut style: Style, children: &[NodeId]) -> NodeId {
         style.display = Display::Grid;
