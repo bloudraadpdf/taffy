@@ -44,43 +44,120 @@ mod min_max_overrides {
     }
 
     #[test]
-    fn intrinsic_track_minimum_can_grow_past_an_initial_zero_growth_limit() {
+    fn intrinsic_track_minimum_keeps_preferred_minimum_and_edge_contributions() {
         for minimum in
             [MinTrackSizingFunction::AUTO, MinTrackSizingFunction::MIN_CONTENT, MinTrackSizingFunction::MAX_CONTENT]
         {
-            for explicit_minimum in [false, true] {
+            let size = Size { width: length(60.0), height: length(40.0) };
+            let zero = Size { width: length(0.0), height: length(0.0) };
+            let edges = Rect { left: length(5.0), right: length(5.0), top: length(5.0), bottom: length(5.0) };
+            let edge_size = Size { width: 10.0, height: 10.0 };
+            for (style, expected) in [
+                (Style { size, ..Default::default() }, Size { width: 60.0, height: 40.0 }),
+                (Style { min_size: size, ..Default::default() }, Size { width: 60.0, height: 40.0 }),
+                (Style { padding: edges, ..Default::default() }, edge_size),
+                (Style { border: edges, ..Default::default() }, edge_size),
+                (Style { padding: edges, border: edges, ..Default::default() }, Size { width: 20.0, height: 20.0 }),
+                (Style { padding: edges, size: zero, ..Default::default() }, edge_size),
+                (Style { padding: edges, min_size: zero, ..Default::default() }, edge_size),
+                (Style { padding: edges, max_size: zero, ..Default::default() }, edge_size),
+                (
+                    Style { padding: edges, margin: Rect::length(2.0), ..Default::default() },
+                    Size { width: 14.0, height: 14.0 },
+                ),
+                (
+                    Style { padding: edges, margin: Rect::length(-2.0), ..Default::default() },
+                    Size { width: 6.0, height: 6.0 },
+                ),
+            ] {
+                for box_sizing in [BoxSizing::ContentBox, BoxSizing::BorderBox] {
+                    let mut tree = new_test_tree();
+                    let child = tree.new_leaf(Style { box_sizing, ..style.clone() }).unwrap();
+                    let stretched = tree.new_leaf(Style::default()).unwrap();
+                    let track = GridTemplateComponent::Single(minmax(minimum, length(0.0)));
+                    let grid = tree
+                        .new_with_children(
+                            Style {
+                                display: Display::Grid,
+                                grid_template_columns: vec![track.clone()],
+                                grid_template_rows: vec![track],
+                                ..Default::default()
+                            },
+                            &[child, stretched],
+                        )
+                        .unwrap();
+                    tree.compute_layout(grid, Size::MAX_CONTENT).unwrap();
+                    assert_eq!(
+                        tree.layout(stretched).unwrap().size.width,
+                        expected.width,
+                        "{minimum:?}; expected {expected:?}"
+                    );
+                    assert_eq!(
+                        tree.layout(grid).unwrap().size.height,
+                        expected.height,
+                        "{minimum:?}; expected {expected:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn an_unspanned_flexible_track_does_not_remove_the_automatic_minimum() {
+        for horizontal in [true, false] {
+            for (tracks, item_span, expected) in [
+                (vec![auto(), auto(), fr(1.0)], 2, 40.0),
+                (vec![auto(), auto(), auto()], 2, 40.0),
+                (vec![auto(), fr(1.0), fr(1.0)], 2, 0.0),
+                (vec![fr(1.0), fr(1.0), fr(1.0)], 1, 80.0),
+            ] {
                 let mut tree = new_test_tree();
-                let size = Size { width: length(60.0), height: length(40.0) };
-                let child = tree
+                let content = tree
+                    .new_leaf(Style { size: Size { width: length(80.0), height: length(80.0) }, ..Default::default() })
+                    .unwrap();
+                let spanned_tracks = Line { start: line(1), end: span(item_span) };
+                let probe_track = Line { start: line(item_span as i16), end: span(1) };
+                let first_track = Line { start: line(1), end: span(1) };
+                let item = tree
+                    .new_with_children(
+                        Style {
+                            grid_column: if horizontal { spanned_tracks.clone() } else { first_track.clone() },
+                            grid_row: if horizontal { first_track.clone() } else { spanned_tracks },
+                            ..Default::default()
+                        },
+                        &[content],
+                    )
+                    .unwrap();
+                let probe = tree
                     .new_leaf(Style {
-                        size: if explicit_minimum { Size::AUTO } else { size },
-                        min_size: if explicit_minimum { size } else { Size::AUTO },
+                        grid_column: if horizontal { probe_track.clone() } else { first_track.clone() },
+                        grid_row: if horizontal { first_track } else { probe_track },
                         ..Default::default()
                     })
                     .unwrap();
-                let stretched = tree.new_leaf(Style::default()).unwrap();
-                let track = GridTemplateComponent::Single(minmax(minimum, length(0.0)));
+                let cross = vec![length(100.0)];
                 let grid = tree
                     .new_with_children(
                         Style {
                             display: Display::Grid,
-                            grid_template_columns: vec![track.clone()],
-                            grid_template_rows: vec![track],
+                            size: if horizontal {
+                                Size { width: length(0.0), height: length(100.0) }
+                            } else {
+                                Size { width: length(100.0), height: length(0.0) }
+                            },
+                            grid_template_columns: if horizontal { tracks.clone() } else { cross.clone() },
+                            grid_template_rows: if horizontal { cross } else { tracks },
                             ..Default::default()
                         },
-                        &[child, stretched],
+                        &[item, probe],
                     )
                     .unwrap();
                 tree.compute_layout(grid, Size::MAX_CONTENT).unwrap();
+                let size = tree.layout(probe).unwrap().size;
                 assert_eq!(
-                    tree.layout(stretched).unwrap().size.width,
-                    60.0,
-                    "{minimum:?}; explicit minimum {explicit_minimum}"
-                );
-                assert_eq!(
-                    tree.layout(grid).unwrap().size.height,
-                    40.0,
-                    "{minimum:?}; explicit minimum {explicit_minimum}"
+                    if horizontal { size.width } else { size.height },
+                    expected,
+                    "horizontal:{horizontal}; span:{item_span}"
                 );
             }
         }
