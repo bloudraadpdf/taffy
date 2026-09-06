@@ -1001,6 +1001,48 @@ mod tests {
     }
 
     #[test]
+    fn inflexible_intrinsic_contribution_is_capped_by_the_flex_basis() {
+        for direction in
+            [FlexDirection::Row, FlexDirection::RowReverse, FlexDirection::Column, FlexDirection::ColumnReverse]
+        {
+            for preferred in [50.0, 500.0] {
+                for (minimum, maximum, expected) in [
+                    (0.0, auto(), 100.0),
+                    (160.0, auto(), 160.0),
+                    (0.0, length(30.0), 30.0),
+                    (160.0, length(130.0), 160.0),
+                ] {
+                    let mut taffy: TaffyTree<()> = TaffyTree::new();
+                    let item = taffy
+                        .new_leaf(Style {
+                            size: Size::auto().with_main(direction, length(preferred)),
+                            min_size: Size::auto().with_main(direction, length(minimum)),
+                            max_size: Size::auto().with_main(direction, maximum),
+                            flex_basis: length(100.0),
+                            flex_shrink: 0.0,
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    let root = taffy
+                        .new_with_children(Style { flex_direction: direction, ..Default::default() }, &[item])
+                        .unwrap();
+                    taffy.compute_layout(root, Size::MAX_CONTENT).unwrap();
+                    assert_eq!(
+                        taffy.layout(root).unwrap().size.main(direction),
+                        expected,
+                        "container: {direction:?};{preferred};{minimum};{maximum:?}"
+                    );
+                    assert_eq!(
+                        taffy.layout(item).unwrap().size.main(direction),
+                        expected,
+                        "item: {direction:?};{preferred};{minimum};{maximum:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn flex_auto_cross_size_uses_the_flexed_main_size() {
         for direction in
             [FlexDirection::Row, FlexDirection::RowReverse, FlexDirection::Column, FlexDirection::ColumnReverse]
