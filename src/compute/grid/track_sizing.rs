@@ -323,8 +323,7 @@ pub(super) fn track_sizing_algorithm<Tree: LayoutPartialTree>(
     }
 
     if axis_tracks.iter().all(|track| {
-        !track.has_intrinsic_sizing_function()
-            && !(percentage_basis.is_none() && track.uses_percentage())
+        !(track.has_intrinsic_sizing_function() || percentage_basis.is_none() && track.uses_percentage())
             && track.base_size == track.growth_limit
     }) {
         return;

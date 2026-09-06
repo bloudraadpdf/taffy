@@ -44,6 +44,7 @@ pub(in super::super) struct GridTrack {
     /// Note: can be infinity
     pub growth_limit: f32,
 
+    /// The resolved limit of a calculated fit-content maximum.
     pub fit_content_calc_limit: f32,
 
     /// A temporary scratch value when sizing tracks. Is used as an additional amount to add to the

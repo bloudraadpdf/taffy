@@ -39,12 +39,14 @@ mod compat {
     }
 
     #[inline(always)]
+    /// Remove a calculated-length tag while preserving pointer provenance.
     #[cfg(all(feature = "calc", feature = "strict_provenance"))]
     pub fn untag_calc_ptr(ptr: *const ()) -> *const () {
         ptr.map_addr(|address| address & !0b111)
     }
 
     #[inline(always)]
+    /// Remove a calculated-length tag with exposed pointer provenance.
     #[cfg(all(feature = "calc", not(feature = "strict_provenance")))]
     pub fn untag_calc_ptr(ptr: *const ()) -> *const () {
         (ptr as usize & !0b111) as *const ()
