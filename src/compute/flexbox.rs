@@ -552,13 +552,14 @@ fn generate_anonymous_flex_items(
             let pb_sum = (padding + border).sum_axes();
             let box_sizing_adjustment =
                 if child_style.box_sizing() == BoxSizing::ContentBox { pb_sum } else { Size::ZERO };
+            let preferred_size =
+                child_style.size().maybe_resolve(constants.node_inner_size, |val, basis| tree.calc(val, basis));
             FlexItem {
                 node: child,
                 order: index as u32,
-                size: child_style
-                    .size()
-                    .maybe_resolve(constants.node_inner_size, |val, basis| tree.calc(val, basis))
+                size: preferred_size
                     .maybe_apply_aspect_ratio(aspect_ratio)
+                    .with_cross(constants.dir, preferred_size.cross(constants.dir))
                     .maybe_add(box_sizing_adjustment),
                 min_size: child_style
                     .min_size()
@@ -764,7 +765,7 @@ fn determine_flex_base_size(
             //    then the flex base size is calculated from its inner
             //    cross size and the flex item’s intrinsic aspect ratio.
 
-            // Note: `child.size` has already been resolved against aspect_ratio in generate_anonymous_flex_items
+            // The main axis of `child.size` already includes aspect-ratio transfer.
             // So B will just work here by using main_size without special handling for aspect_ratio
             let main_size = child.size.main(dir);
             if let Some(flex_basis) = flex_basis.or(main_size) {
@@ -1427,12 +1428,28 @@ fn determine_hypothetical_cross_size(
 
         // Sizes transferred through the aspect ratio clamp the hypothetical cross size
         // https://github.com/w3c/csswg-drafts/issues/10997
-        let transferred_min_cross = child.min_size.maybe_apply_aspect_ratio(child.aspect_ratio).cross(constants.dir);
-        let transferred_max_cross = child.max_size.maybe_apply_aspect_ratio(child.aspect_ratio).cross(constants.dir);
+        let cross_size_is_auto = child.size.cross(constants.dir).is_none();
+        let cross_constraint_ratio = if cross_size_is_auto { child.aspect_ratio } else { None };
+        let transferred_min_cross =
+            child.min_size.maybe_apply_aspect_ratio(cross_constraint_ratio).cross(constants.dir);
+        let transferred_max_cross =
+            child.max_size.maybe_apply_aspect_ratio(cross_constraint_ratio).cross(constants.dir);
+
+        let ratio_cross = child.aspect_ratio.map(|ratio| {
+            let adjustment = if tree.get_flexbox_child_style(child.node).box_sizing() == BoxSizing::ContentBox {
+                (child.padding + child.border).sum_axes()
+            } else {
+                Size::ZERO
+            };
+            let main = (child.target_size.main(constants.dir) - adjustment.main(constants.dir)).max(0.0);
+            let cross = if constants.is_row { main / ratio } else { main * ratio };
+            cross + adjustment.cross(constants.dir)
+        });
 
         let child_cross = child
             .size
             .cross(constants.dir)
+            .or(ratio_cross)
             .maybe_clamp(transferred_min_cross, transferred_max_cross)
             .maybe_max(padding_border_sum);
 

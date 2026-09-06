@@ -1001,6 +1001,57 @@ mod tests {
     }
 
     #[test]
+    fn flex_auto_cross_size_uses_the_flexed_main_size() {
+        for direction in
+            [FlexDirection::Row, FlexDirection::RowReverse, FlexDirection::Column, FlexDirection::ColumnReverse]
+        {
+            let axes = |main, cross| Size { width: main, height: main }.with_cross(direction, cross);
+            for (size, minimum, maximum, expected) in [
+                (axes(length(30.0), auto()), axes(length(0.0), length(0.0)), axes(auto(), auto()), (40.0, 40.0)),
+                (axes(auto(), length(30.0)), axes(length(0.0), length(0.0)), axes(auto(), auto()), (40.0, 30.0)),
+                (axes(auto(), length(30.0)), axes(length(0.0), length(0.0)), axes(length(10.0), auto()), (10.0, 30.0)),
+                (axes(auto(), length(20.0)), axes(length(50.0), length(0.0)), axes(auto(), auto()), (50.0, 20.0)),
+                (axes(auto(), auto()), axes(length(0.0), length(0.0)), axes(length(10.0), auto()), (10.0, 10.0)),
+                (axes(auto(), auto()), axes(length(0.0), length(34.0)), axes(auto(), auto()), (40.0, 40.0)),
+            ] {
+                for basis in [length(0.0), auto(), length(60.0)] {
+                    let mut taffy: TaffyTree<()> = TaffyTree::new();
+                    let item = taffy
+                        .new_leaf(Style {
+                            size,
+                            min_size: minimum,
+                            max_size: maximum,
+                            aspect_ratio: Some(1.0),
+                            flex_grow: 1.0,
+                            flex_basis: basis,
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    let root = taffy
+                        .new_with_children(
+                            Style {
+                                size: Size { width: length(40.0), height: length(40.0) },
+                                flex_direction: direction,
+                                align_items: Some(AlignSelf::FLEX_START),
+                                ..Default::default()
+                            },
+                            &[item],
+                        )
+                        .unwrap();
+                    taffy.compute_layout(root, Size::MAX_CONTENT).unwrap();
+                    let expected_size =
+                        Size { width: expected.0, height: expected.0 }.with_cross(direction, expected.1);
+                    assert_eq!(
+                        taffy.layout(item).unwrap().size,
+                        expected_size,
+                        "{direction:?};{size:?};{minimum:?};{maximum:?};{basis:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn flex_line_baseline_size_excludes_items_with_auto_cross_margins() {
         for (auto_top, auto_bottom) in [(true, false), (false, true), (true, true)] {
             for additional_participant in [false, true] {
