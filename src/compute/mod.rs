@@ -42,7 +42,7 @@ pub use leaf::compute_leaf_layout;
 pub use self::block::{compute_block_layout, BlockContext, BlockFormattingContext};
 
 #[cfg(feature = "flexbox")]
-pub use self::flexbox::compute_flexbox_layout;
+pub use self::flexbox::{balanced_flex_line_ends, compute_flexbox_layout};
 
 #[cfg(feature = "grid")]
 pub use self::grid::compute_grid_layout;

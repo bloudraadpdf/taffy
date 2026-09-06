@@ -16,8 +16,11 @@ use crate::util::{MaybeResolve, ResolveOrZero};
 use crate::{BoxGenerationMode, BoxSizing, Direction, RequestedAxis};
 
 use super::common::alignment::apply_alignment_fallback;
+/// Optimal balanced line assignment.
+mod balance;
 #[cfg(feature = "content_size")]
 use super::common::content_size::compute_content_size_contribution;
+pub use balance::balanced_flex_line_ends;
 
 /// The intermediate results of a flexbox calculation for a single item
 struct FlexItem {
@@ -133,6 +136,10 @@ struct AlgoConstants {
     is_wrap: bool,
     /// Is the wrap direction inverted
     is_wrap_reverse: bool,
+    /// Whether line collection minimises squared line error.
+    is_balanced: bool,
+    /// Authored minimum line count and available cross-space divisor.
+    minimum_line_count: core::num::NonZeroU32,
 
     /// The item's min_size style
     min_size: Size<Option<f32>>,
@@ -450,8 +457,9 @@ fn compute_constants(
     let dir = style.flex_direction();
     let is_row = dir.is_row();
     let is_column = dir.is_column();
-    let is_wrap = matches!(style.flex_wrap(), FlexWrap::Wrap | FlexWrap::WrapReverse);
-    let is_wrap_reverse = style.flex_wrap() == FlexWrap::WrapReverse;
+    let is_wrap = style.flex_wrap() != FlexWrap::NoWrap;
+    let is_wrap_reverse = matches!(style.flex_wrap(), FlexWrap::WrapReverse | FlexWrap::BalanceReverse);
+    let is_balanced = matches!(style.flex_wrap(), FlexWrap::Balance | FlexWrap::BalanceReverse);
 
     let aspect_ratio = style.aspect_ratio();
     let edge_basis = inline_percentage_basis.resolve(parent_size);
@@ -496,6 +504,8 @@ fn compute_constants(
         is_column,
         is_wrap,
         is_wrap_reverse,
+        is_balanced,
+        minimum_line_count: style.flex_line_count(),
         min_size: style
             .min_size()
             .maybe_resolve(parent_size, |val, basis| tree.calc(val, basis))
@@ -643,7 +653,17 @@ fn determine_available_space(
             .maybe_sub(constants.content_box_inset.vertical_axis_sum()),
     };
 
-    Size { width, height }
+    let mut available = Size { width, height };
+    if constants.is_wrap {
+        let count = constants.minimum_line_count.get() as f32;
+        available.set_cross(
+            constants.dir,
+            available.cross(constants.dir).map_definite_value(|size| {
+                ((size - (count - 1.0) * constants.gap.cross(constants.dir)) / count).max(0.0)
+            }),
+        );
+    }
+    available
 }
 
 /// Determine the flex base size and hypothetical main size of each item.
@@ -700,9 +720,9 @@ fn determine_flex_base_size(
 
         // Clamp available space by min- and max- size
         let cross_axis_available_space: AvailableSpace = match available_space.cross(dir) {
-            AvailableSpace::Definite(val) => AvailableSpace::Definite(
-                cross_axis_parent_size.unwrap_or(val).maybe_clamp(child_min_cross, child_max_cross),
-            ),
+            AvailableSpace::Definite(val) => {
+                AvailableSpace::Definite(val.maybe_clamp(child_min_cross, child_max_cross))
+            }
             AvailableSpace::MinContent => match child_min_cross {
                 Some(min) => AvailableSpace::Definite(min),
                 None => AvailableSpace::MinContent,
@@ -920,6 +940,27 @@ fn collect_flex_lines<'a>(
             None => available_space.main(constants.dir),
         };
 
+        if constants.is_balanced && main_axis_available_space != AvailableSpace::MinContent {
+            let sizes =
+                flex_items.iter().map(|item| item.hypothetical_outer_size.main(constants.dir)).collect::<Vec<_>>();
+            let ends = balanced_flex_line_ends(
+                &sizes,
+                constants.gap.main(constants.dir),
+                main_axis_available_space.into_option(),
+                constants.minimum_line_count,
+            );
+            let mut lines = new_vec_with_capacity(ends.len());
+            let mut remaining = flex_items.as_mut_slice();
+            let mut start = 0;
+            for end in ends {
+                let (items, rest) = remaining.split_at_mut(end - start);
+                lines.push(FlexLine { items, cross_size: 0.0, offset_cross: 0.0 });
+                remaining = rest;
+                start = end;
+            }
+            return lines;
+        }
+
         match main_axis_available_space {
             // If we're sizing under a max-content constraint then the flex items will never wrap
             // (at least for now - future extensions to the CSS spec may add provisions for forced wrap points)
@@ -1069,17 +1110,12 @@ fn determine_container_main_size(
                                 item.flex_basis + item.margin.main_axis_sum(constants.dir)
                             }
                             _ => {
-                                // Parent size for child sizing
-                                let cross_axis_parent_size = constants.node_inner_size.cross(dir);
-
                                 // Available space for child sizing
                                 let cross_axis_margin_sum = constants.margin.cross_axis_sum(dir);
                                 let child_min_cross = item.min_size.cross(dir).maybe_add(cross_axis_margin_sum);
                                 let child_max_cross = item.max_size.cross(dir).maybe_add(cross_axis_margin_sum);
-                                let cross_axis_available_space: AvailableSpace = available_space
-                                    .cross(dir)
-                                    .map_definite_value(|val| cross_axis_parent_size.unwrap_or(val))
-                                    .maybe_clamp(child_min_cross, child_max_cross);
+                                let cross_axis_available_space: AvailableSpace =
+                                    available_space.cross(dir).maybe_clamp(child_min_cross, child_max_cross);
 
                                 let child_available_space = available_space.with_cross(dir, cross_axis_available_space);
 

@@ -543,6 +543,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Should elements wrap, or stay in a single line?
     #[cfg(feature = "flexbox")]
     pub flex_wrap: FlexWrap,
+    /// Minimum line count and divisor for available cross space.
+    #[cfg(feature = "flexbox")]
+    pub flex_line_count: core::num::NonZeroU32,
 
     // Flexbox item properties
     /// Sets the initial main axis size of the item
@@ -649,6 +652,8 @@ impl<S: CheapCloneStr> Style<S> {
         flex_direction: FlexDirection::Row,
         #[cfg(feature = "flexbox")]
         flex_wrap: FlexWrap::NoWrap,
+        #[cfg(feature = "flexbox")]
+        flex_line_count: core::num::NonZeroU32::MIN,
         #[cfg(feature = "flexbox")]
         flex_grow: 0.0,
         #[cfg(feature = "flexbox")]
@@ -908,6 +913,10 @@ impl<S: CheapCloneStr> FlexboxContainerStyle for Style<S> {
         self.flex_wrap
     }
     #[inline(always)]
+    fn flex_line_count(&self) -> core::num::NonZeroU32 {
+        self.flex_line_count
+    }
+    #[inline(always)]
     fn gap(&self) -> Size<LengthPercentage> {
         self.gap
     }
@@ -934,6 +943,10 @@ impl<T: FlexboxContainerStyle> FlexboxContainerStyle for &'_ T {
     #[inline(always)]
     fn flex_wrap(&self) -> FlexWrap {
         (*self).flex_wrap()
+    }
+    #[inline(always)]
+    fn flex_line_count(&self) -> core::num::NonZeroU32 {
+        (*self).flex_line_count()
     }
     #[inline(always)]
     fn gap(&self) -> Size<LengthPercentage> {
@@ -1277,6 +1290,8 @@ mod tests {
             flex_direction: Default::default(),
             #[cfg(feature = "flexbox")]
             flex_wrap: Default::default(),
+            #[cfg(feature = "flexbox")]
+            flex_line_count: core::num::NonZeroU32::MIN,
             #[cfg(any(feature = "flexbox", feature = "grid"))]
             align_items: Default::default(),
             #[cfg(any(feature = "flexbox", feature = "grid"))]
@@ -1408,12 +1423,12 @@ mod tests {
         assert_type_size::<GridTemplateComponent<String>>(56);
         assert_type_size::<GridPlacement<String>>(32);
         assert_type_size::<Line<GridPlacement<String>>>(64);
-        assert_type_size::<Style<String>>(608);
+        assert_type_size::<Style<String>>(616);
 
         // String-type dependent (Arc<str>)
         assert_type_size::<GridTemplateComponent<Arc<str>>>(56);
         assert_type_size::<GridPlacement<Arc<str>>>(24);
         assert_type_size::<Line<GridPlacement<Arc<str>>>>(48);
-        assert_type_size::<Style<Arc<str>>>(576);
+        assert_type_size::<Style<Arc<str>>>(584);
     }
 }

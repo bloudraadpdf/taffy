@@ -15,6 +15,12 @@ pub trait FlexboxContainerStyle: CoreStyle {
         Style::<Self::CustomIdent>::DEFAULT.flex_wrap
     }
 
+    /// Minimum line count and divisor for available cross space.
+    #[inline(always)]
+    fn flex_line_count(&self) -> core::num::NonZeroU32 {
+        Style::<Self::CustomIdent>::DEFAULT.flex_line_count
+    }
+
     /// How large should the gaps between items in a grid or flex container be?
     #[inline(always)]
     fn gap(&self) -> Size<LengthPercentage> {
@@ -83,6 +89,10 @@ pub enum FlexWrap {
     Wrap,
     /// Items will wrap in the opposite direction to this item's [`FlexDirection`]
     WrapReverse,
+    /// Items wrap into balanced lines.
+    Balance,
+    /// Items wrap into balanced lines in the opposite cross direction.
+    BalanceReverse,
 }
 
 #[cfg(feature = "parse")]
