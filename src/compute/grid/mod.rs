@@ -169,10 +169,20 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
 
     // This is very similar to the inner_node_size except if the inner_node_size is not definite but the node
     // has a min- or max- size style then that will be used in it's place.
-    let auto_fit_container_size = outer_node_size
-        .or(max_size)
-        .or(min_size)
-        .maybe_clamp(min_size, max_size)
+    let [repeat_preferred_size, repeat_min_size, repeat_max_size] = match style.grid_auto_repeat_constraints() {
+        Some(constraints) => [constraints.size, constraints.min_size, constraints.max_size].map(|size| {
+            size.maybe_resolve(parent_size, |value, basis| tree.calc(value, basis))
+                .maybe_apply_aspect_ratio(aspect_ratio)
+                .maybe_add(box_sizing_adjustment)
+        }),
+        None => [known_dimensions.or(preferred_size), min_size, max_size],
+    };
+    let repeat_outer_size =
+        repeat_preferred_size.maybe_clamp(repeat_min_size, repeat_max_size).maybe_max(padding_border_size);
+    let auto_fit_container_size = repeat_outer_size
+        .or(repeat_max_size)
+        .or(repeat_min_size)
+        .maybe_clamp(repeat_min_size, repeat_max_size)
         .maybe_max(padding_border_size)
         .maybe_sub(content_box_inset.sum_axes());
 
@@ -182,7 +192,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
     // Otherwise, if the grid container has a definite min size in the relevant axis:
     //   - then the number of repetitions is the smallest possible positive integer that fulfills that minimum requirement
     // Otherwise, the specified track list repeats only once.
-    let auto_repeat_fit_strategy = outer_node_size.or(max_size).map(|val| match val {
+    let auto_repeat_fit_strategy = repeat_outer_size.or(repeat_max_size).map(|val| match val {
         Some(_) => AutoRepeatStrategy::MaxRepetitionsThatDoNotOverflow,
         None => AutoRepeatStrategy::MinRepetitionsThatDoOverflow,
     });

@@ -30,8 +30,8 @@ pub use self::flex::{FlexDirection, FlexWrap, FlexboxContainerStyle, FlexboxItem
 pub use self::float::{Clear, Float, FloatDirection};
 #[cfg(feature = "grid")]
 pub use self::grid::{
-    GenericGridPlacement, GenericGridTemplateComponent, GenericRepetition, GridAutoFlow, GridAutoTracks,
-    GridContainerStyle, GridItemInlineAxis, GridItemStyle, GridPlacement, GridTemplateComponent,
+    GenericGridPlacement, GenericGridTemplateComponent, GenericRepetition, GridAutoFlow, GridAutoRepeatConstraints,
+    GridAutoTracks, GridContainerStyle, GridItemInlineAxis, GridItemStyle, GridPlacement, GridTemplateComponent,
     GridTemplateRepetition, GridTemplateTracks, MaxTrackSizingFunction, MinTrackSizingFunction, RepetitionCount,
     TrackSizingFunction,
 };
@@ -566,6 +566,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Defines the track sizing functions (widths) of the grid columns
     #[cfg(feature = "grid")]
     pub grid_template_columns: GridTrackVec<GridTemplateComponent<S>>,
+    /// Repeat-count constraints retained separately from resolved used sizes.
+    #[cfg(feature = "grid")]
+    pub grid_auto_repeat_constraints: Option<GridAutoRepeatConstraints>,
     /// Defines the size of implicitly created rows
     #[cfg(feature = "grid")]
     pub grid_auto_rows: GridTrackVec<TrackSizingFunction>,
@@ -657,6 +660,8 @@ impl<S: CheapCloneStr> Style<S> {
         grid_template_rows: GridTrackVec::new(),
         #[cfg(feature = "grid")]
         grid_template_columns: GridTrackVec::new(),
+        #[cfg(feature = "grid")]
+        grid_auto_repeat_constraints: None,
         #[cfg(feature = "grid")]
         grid_template_areas: None,
         #[cfg(feature = "grid")]
@@ -1028,6 +1033,10 @@ impl<S: CheapCloneStr> GridContainerStyle for Style<S> {
         Some(self.grid_template_columns.iter().map(|c| c.as_component_ref()))
     }
     #[inline(always)]
+    fn grid_auto_repeat_constraints(&self) -> Option<GridAutoRepeatConstraints> {
+        self.grid_auto_repeat_constraints
+    }
+    #[inline(always)]
     fn grid_auto_rows(&self) -> Self::AutoTrackList<'_> {
         self.grid_auto_rows.iter().copied()
     }
@@ -1129,6 +1138,10 @@ impl<T: GridContainerStyle> GridContainerStyle for &'_ T {
     #[inline(always)]
     fn grid_template_columns(&self) -> Option<Self::TemplateTrackList<'_>> {
         (*self).grid_template_columns()
+    }
+    #[inline(always)]
+    fn grid_auto_repeat_constraints(&self) -> Option<GridAutoRepeatConstraints> {
+        (*self).grid_auto_repeat_constraints()
     }
     #[inline(always)]
     fn grid_auto_rows(&self) -> Self::AutoTrackList<'_> {
@@ -1298,6 +1311,8 @@ mod tests {
             #[cfg(feature = "grid")]
             grid_template_columns: Default::default(),
             #[cfg(feature = "grid")]
+            grid_auto_repeat_constraints: None,
+            #[cfg(feature = "grid")]
             grid_template_row_names: Default::default(),
             #[cfg(feature = "grid")]
             grid_template_column_names: Default::default(),
@@ -1381,6 +1396,8 @@ mod tests {
 
         // CSS Grid Container
         assert_type_size::<GridAutoFlow>(1);
+        assert_type_size::<GridAutoRepeatConstraints>(48);
+        assert_type_size::<Option<GridAutoRepeatConstraints>>(56);
         assert_type_size::<MinTrackSizingFunction>(8);
         assert_type_size::<MaxTrackSizingFunction>(8);
         assert_type_size::<TrackSizingFunction>(16);
@@ -1391,12 +1408,12 @@ mod tests {
         assert_type_size::<GridTemplateComponent<String>>(56);
         assert_type_size::<GridPlacement<String>>(32);
         assert_type_size::<Line<GridPlacement<String>>>(64);
-        assert_type_size::<Style<String>>(552);
+        assert_type_size::<Style<String>>(608);
 
         // String-type dependent (Arc<str>)
         assert_type_size::<GridTemplateComponent<Arc<str>>>(56);
         assert_type_size::<GridPlacement<Arc<str>>>(24);
         assert_type_size::<Line<GridPlacement<Arc<str>>>>(48);
-        assert_type_size::<Style<Arc<str>>>(520);
+        assert_type_size::<Style<Arc<str>>>(576);
     }
 }

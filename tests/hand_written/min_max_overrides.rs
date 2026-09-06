@@ -4,6 +4,133 @@ mod min_max_overrides {
     use taffy_test_helpers::new_test_tree;
 
     #[test]
+    #[cfg(feature = "detailed_layout_info")]
+    fn auto_repeat_constraints_survive_an_intrinsic_used_size() {
+        for horizontal in [true, false] {
+            for repeat in [RepetitionCount::AutoFill, RepetitionCount::AutoFit] {
+                for gap in [0.0, 10.0] {
+                    for box_sizing in [BoxSizing::ContentBox, BoxSizing::BorderBox] {
+                        for percentage in [false, true] {
+                            let mut tree = new_test_tree();
+                            let placement = Line { start: line(-2), end: line(-1) };
+                            let child = tree
+                                .new_leaf(Style {
+                                    grid_column: if horizontal { placement.clone() } else { Default::default() },
+                                    grid_row: if horizontal { Default::default() } else { placement },
+                                    ..Default::default()
+                                })
+                                .expect("the last repeated-track item must be created");
+                            let edge_size = 20.0;
+                            let adjustment = if box_sizing == BoxSizing::BorderBox { edge_size } else { 0.0 };
+                            let used_content =
+                                if repeat == RepetitionCount::AutoFit { 100.0 } else { 300.0 + gap * 2.0 };
+                            let repeated_size = length(used_content + adjustment);
+                            let max_size = if percentage { percent(0.5) } else { length(320.0 + adjustment) };
+                            let tracks = vec![taffy::style_helpers::repeat(repeat, vec![length(100.0)])];
+                            let grid = tree
+                                .new_with_children(
+                                    Style {
+                                        display: Display::Grid,
+                                        box_sizing,
+                                        padding: Rect::length(5.0),
+                                        border: Rect::length(5.0),
+                                        gap: Size::length(gap),
+                                        size: if horizontal {
+                                            Size { width: repeated_size, height: auto() }
+                                        } else {
+                                            Size { width: auto(), height: repeated_size }
+                                        },
+                                        grid_auto_repeat_constraints: Some(taffy::GridAutoRepeatConstraints {
+                                            size: Size::auto(),
+                                            min_size: Size::auto(),
+                                            max_size: if horizontal {
+                                                Size { width: max_size, height: auto() }
+                                            } else {
+                                                Size { width: auto(), height: max_size }
+                                            },
+                                        }),
+                                        grid_template_columns: if horizontal { tracks.clone() } else { Vec::new() },
+                                        grid_template_rows: if horizontal { Vec::new() } else { tracks },
+                                        ..Default::default()
+                                    },
+                                    &[child],
+                                )
+                                .expect("the externally sized grid must be created");
+                            tree.compute_layout(
+                                grid,
+                                Size {
+                                    width: AvailableSpace::Definite((320.0 + adjustment) * 2.0),
+                                    height: AvailableSpace::Definite((320.0 + adjustment) * 2.0),
+                                },
+                            )
+                            .expect("the externally sized grid must lay out");
+                            let taffy::DetailedLayoutInfo::Grid(info) = tree.detailed_layout_info(grid) else {
+                                panic!("grid tracks must remain available")
+                            };
+                            let tracks = if horizontal { &info.columns } else { &info.rows };
+                            assert_eq!(
+                                tracks.sizes,
+                                if repeat == RepetitionCount::AutoFit { vec![0.0, 0.0, 100.0] } else { vec![100.0; 3] },
+                                "{horizontal};{repeat:?};{gap};{box_sizing:?};{percentage}"
+                            );
+                            let size = tree.layout(grid).expect("the grid must have a used size").size;
+                            assert_eq!(if horizontal { size.width } else { size.height }, used_content + edge_size);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[cfg(feature = "detailed_layout_info")]
+    fn auto_repeat_uses_the_retained_constraint_kind() {
+        for (preferred, minimum, maximum, count) in [
+            (auto(), auto(), auto(), 1),
+            (auto(), length(250.0), auto(), 3),
+            (auto(), auto(), length(250.0), 2),
+            (length(250.0), auto(), length(350.0), 2),
+            (length(350.0), auto(), length(250.0), 2),
+            (length(150.0), length(250.0), length(200.0), 2),
+        ] {
+            for horizontal in [true, false] {
+                let axis_size = |value| {
+                    if horizontal {
+                        Size { width: value, height: auto() }
+                    } else {
+                        Size { width: auto(), height: value }
+                    }
+                };
+                let tracks = vec![taffy::style_helpers::repeat(RepetitionCount::AutoFill, vec![length(100.0)])];
+                let mut tree = new_test_tree();
+                let grid = tree
+                    .new_leaf(Style {
+                        display: Display::Grid,
+                        size: axis_size(length(500.0)),
+                        grid_auto_repeat_constraints: Some(taffy::GridAutoRepeatConstraints {
+                            size: axis_size(preferred),
+                            min_size: axis_size(minimum),
+                            max_size: axis_size(maximum),
+                        }),
+                        grid_template_columns: if horizontal { tracks.clone() } else { Vec::new() },
+                        grid_template_rows: if horizontal { Vec::new() } else { tracks },
+                        ..Default::default()
+                    })
+                    .expect("the retained-constraint grid must be created");
+                tree.compute_layout(grid, Size::MAX_CONTENT).expect("the retained-constraint grid must lay out");
+                let taffy::DetailedLayoutInfo::Grid(info) = tree.detailed_layout_info(grid) else {
+                    panic!("grid tracks must remain available")
+                };
+                assert_eq!(
+                    if horizontal { info.columns.sizes.len() } else { info.rows.sizes.len() },
+                    count,
+                    "{horizontal};{preferred:?};{minimum:?};{maximum:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
     #[cfg(feature = "calc")]
     fn fit_content_calculation_keeps_its_limit_and_intrinsic_minimum() {
         static LIMIT: f64 = 0.0;

@@ -170,6 +170,18 @@ where
     }
 }
 
+/// Size constraints for repeat counting before an embedding engine resolves the grid's used size.
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub struct GridAutoRepeatConstraints {
+    /// Preferred sizes before intrinsic sizing.
+    pub size: Size<Dimension>,
+    /// Minimum sizes before intrinsic sizing.
+    pub min_size: Size<Dimension>,
+    /// Maximum sizes before intrinsic sizing.
+    pub max_size: Size<Dimension>,
+}
+
 /// The set of styles required for a CSS Grid container
 pub trait GridContainerStyle: CoreStyle {
     /// The type for a `repeat()` within a grid_template_rows or grid_template_columns
@@ -207,6 +219,10 @@ pub trait GridContainerStyle: CoreStyle {
     fn grid_template_rows(&self) -> Option<Self::TemplateTrackList<'_>>;
     /// Defines the track sizing functions (widths) of the grid columns
     fn grid_template_columns(&self) -> Option<Self::TemplateTrackList<'_>>;
+    /// Independent repeat-count constraints when used sizes were resolved by an embedding engine.
+    fn grid_auto_repeat_constraints(&self) -> Option<GridAutoRepeatConstraints> {
+        None
+    }
     /// Defines the size of implicitly created rows
     fn grid_auto_rows(&self) -> Self::AutoTrackList<'_>;
     /// Defined the size of implicitly created columns
