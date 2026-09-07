@@ -71,7 +71,8 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         .max_size()
         .maybe_resolve(parent_size, |val, basis| tree.calc(val, basis))
         .maybe_apply_aspect_ratio(aspect_ratio)
-        .maybe_add(box_sizing_adjustment);
+        .maybe_add(box_sizing_adjustment)
+        .maybe_max(min_size);
     let preferred_size = if inputs.sizing_mode == SizingMode::InherentSize {
         style
             .size()

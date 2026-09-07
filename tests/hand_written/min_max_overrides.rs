@@ -4,6 +4,76 @@ mod min_max_overrides {
     use taffy_test_helpers::new_test_tree;
 
     #[test]
+    fn conflicting_grid_bounds_use_the_minimum_when_sizing_flexible_tracks() {
+        let mut failures = Vec::new();
+        for horizontal in [true, false] {
+            for box_sizing in [BoxSizing::ContentBox, BoxSizing::BorderBox] {
+                for edge in [0.0, 7.0] {
+                    for (minimum, maximum, extent, first, second) in [
+                        (Some(70.0), Some(60.0), 70.0, 10.0, 27.0),
+                        (Some(83.0), Some(53.0), 83.0, 10.0, 40.0),
+                        (Some(108.0), Some(60.0), 108.0, 15.0, 60.0),
+                        (Some(70.0), None, 83.0, 10.0, 40.0),
+                        (None, Some(70.0), 70.0, 10.0, 27.0),
+                    ] {
+                        let mut tree = new_test_tree();
+                        tree.disable_rounding();
+                        let children =
+                            [tree.new_leaf(Style::default()).unwrap(), tree.new_leaf(Style::default()).unwrap()];
+                        let adjustment = if box_sizing == BoxSizing::BorderBox { edge * 2.0 } else { 0.0 };
+                        let bound = |value: Option<f32>| value.map_or(auto(), |value| length(value + adjustment));
+                        let tracks = vec![
+                            GridTemplateComponent::Single(minmax(length(10.0), fr(1.0))),
+                            GridTemplateComponent::Single(minmax(length(10.0), fr(4.0))),
+                        ];
+                        let other = vec![GridTemplateComponent::Single(length(50.0))];
+                        let grid = tree
+                            .new_with_children(
+                                Style {
+                                    display: Display::Grid,
+                                    box_sizing,
+                                    border: Rect::length(edge),
+                                    min_size: if horizontal {
+                                        Size { width: bound(minimum), height: auto() }
+                                    } else {
+                                        Size { width: auto(), height: bound(minimum) }
+                                    },
+                                    max_size: if horizontal {
+                                        Size { width: bound(maximum), height: auto() }
+                                    } else {
+                                        Size { width: auto(), height: bound(maximum) }
+                                    },
+                                    grid_template_columns: if horizontal { tracks.clone() } else { other.clone() },
+                                    grid_template_rows: if horizontal { other } else { tracks },
+                                    gap: Size::length(33.0),
+                                    ..Default::default()
+                                },
+                                &children,
+                            )
+                            .unwrap();
+                        tree.compute_layout(grid, Size::MAX_CONTENT).unwrap();
+                        let selected_extent = |node| {
+                            let size = tree.layout(node).unwrap().size;
+                            if horizontal {
+                                size.width
+                            } else {
+                                size.height
+                            }
+                        };
+                        let actual =
+                            [selected_extent(grid), selected_extent(children[0]), selected_extent(children[1])];
+                        let expected = [extent + edge * 2.0, first, second];
+                        if actual.iter().zip(expected).any(|(actual, expected)| (actual - expected).abs() > 0.001) {
+                            failures.push(format!("{horizontal};{box_sizing:?};{edge};{minimum:?};{maximum:?}: expected {expected:?}, got {actual:?}"));
+                        }
+                    }
+                }
+            }
+        }
+        assert!(failures.is_empty(), "{} failures:\n{}", failures.len(), failures.join("\n"));
+    }
+
+    #[test]
     #[cfg(feature = "detailed_layout_info")]
     fn auto_repeat_constraints_survive_an_intrinsic_used_size() {
         for horizontal in [true, false] {
