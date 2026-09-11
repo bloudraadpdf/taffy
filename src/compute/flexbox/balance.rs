@@ -1,7 +1,17 @@
 use core::num::NonZeroU32;
 use core::ops::Range;
 
+use crate::geometry::Line;
 use crate::util::sys::Vec;
+
+/// Main size and margins discarded only at a line boundary.
+#[derive(Clone, Copy, Debug)]
+pub(super) struct BalancedItem {
+    /// Hypothetical main size before boundary trimming or the zero floor.
+    pub outer_size: f32,
+    /// Margins discarded when the item starts or ends a line.
+    pub trimmed_margins: Line<f32>,
+}
 
 /// Squared cost of one line plus the optimal remaining suffix.
 #[derive(Clone, Copy)]
@@ -115,45 +125,58 @@ impl<'a> IntervalCosts<'a> {
     }
 }
 
-/// Nonnegative line-collection sizes and their prefix sums.
+/// Prefix coordinates after applying each possible boundary trim.
 struct BalanceInput {
-    /// Outer hypothetical main sizes, floored at zero.
-    sizes: Vec<f64>,
-    /// Cumulative item sizes including one gap per item.
-    prefix: Vec<f64>,
-    /// Main-axis gap between adjacent items.
-    gap: f64,
+    /// Prefix coordinates with the first-item margin removed.
+    starts: Vec<f64>,
+    /// Prefix coordinates with the last-item margin removed.
+    ends: Vec<f64>,
+    /// Sizes after removing both boundary margins and flooring at zero.
+    singletons: Vec<f64>,
+    /// Last-item sizes used to enforce zero-item placement.
+    end_sizes: Vec<f64>,
     /// Finite inner main size, or an unbounded main constraint.
     limit: Option<f64>,
 }
 
 impl BalanceInput {
     /// Normalise collection inputs without changing flexible-length inputs.
-    fn new(sizes: &[f32], gap: f32, limit: Option<f32>) -> Self {
-        let sizes: Vec<_> = sizes.iter().map(|&size| f64::from(size.max(0.0))).collect();
+    fn new(items: &[BalancedItem], gap: f32, limit: Option<f32>) -> Self {
         let gap = f64::from(gap.max(0.0));
-        let mut prefix = Vec::new();
-        prefix.push(0.0);
-        for size in &sizes {
-            prefix.push(prefix.last().copied().unwrap() + size + gap);
-        }
-        Self {
-            sizes,
-            prefix,
-            gap,
+        let mut input = Self {
+            starts: Vec::new(),
+            ends: Vec::new(),
+            singletons: Vec::new(),
+            end_sizes: Vec::new(),
             limit: limit.filter(|value| value.is_finite()).map(|value| f64::from(value.max(0.0))),
+        };
+        let mut prefix = 0.0;
+        for item in items {
+            let outer = f64::from(item.outer_size);
+            let start = f64::from(item.trimmed_margins.start);
+            let end = f64::from(item.trimmed_margins.end);
+            input.starts.push(prefix + outer.max(0.0) - (outer - start).max(0.0));
+            input.ends.push(prefix + (outer - end).max(0.0));
+            input.singletons.push((outer - start - end).max(0.0));
+            input.end_sizes.push((outer - end).max(0.0));
+            prefix += outer.max(0.0) + gap;
         }
+        input
     }
 
     /// Measure a nonempty line, including only its internal gaps.
     fn length(&self, start: usize, end: usize) -> f64 {
-        self.prefix[end] - self.prefix[start] - self.gap
+        if end == start + 1 {
+            self.singletons[start]
+        } else {
+            self.ends[end - 1] - self.starts[start]
+        }
     }
 
     /// Whether a following zero item could instead join this line.
     fn forces_singleton(&self, start: usize, end: usize) -> bool {
-        self.sizes.get(end) == Some(&0.0)
-            && self.limit.map_or(true, |limit| self.length(start, end) + self.gap <= limit)
+        self.end_sizes.get(end) == Some(&0.0)
+            && self.limit.map_or(true, |limit| self.length(start, end) <= limit && self.length(start, end + 1) <= limit)
     }
 
     /// Count the fewest capacity-constrained lines.
@@ -161,7 +184,7 @@ impl BalanceInput {
         let Some(limit) = self.limit else { return 1 };
         let mut lines = 1;
         let mut start = 0;
-        for end in 1..=self.sizes.len() {
+        for end in 1..=self.starts.len() {
             if end > start + 1 && self.length(start, end) > limit {
                 lines += 1;
                 start = end - 1;
@@ -172,22 +195,19 @@ impl BalanceInput {
 
     /// Insert the normal and zero-constrained suffix costs in their valid ranges.
     fn insert_suffix(&self, costs: &mut IntervalCosts<'_>, end: usize, normal: f64, singleton: f64) {
-        let center = self.prefix[end] - self.gap;
-        let upper = end.min(costs.starts.len());
-        let lower =
-            self.limit.map_or(0, |limit| costs.starts.partition_point(|&start| start < center - limit)).min(upper);
-        if self.sizes.get(end) == Some(&0.0) {
+        let boundary = self.ends[end - 1];
+        let center = boundary - self.limit.unwrap_or(0.0);
+        let upper = costs.starts.len();
+        let lower = self.limit.map_or(0, |limit| costs.starts.partition_point(|&start| start < boundary - limit));
+        if self.end_sizes.get(end) == Some(&0.0) {
             let split = self
                 .limit
-                .map_or(lower, |limit| costs.starts.partition_point(|&start| start < self.prefix[end] - limit))
+                .map_or(lower, |limit| costs.starts.partition_point(|&start| start < self.ends[end] - limit))
                 .clamp(lower, upper);
             costs.insert(lower..split, LineCost { end, center, suffix: normal });
             costs.insert(split..upper, LineCost { end, center, suffix: singleton });
         } else {
             costs.insert(lower..upper, LineCost { end, center, suffix: normal });
-        }
-        if end <= costs.starts.len() && self.limit.is_some_and(|limit| self.sizes[end - 1] > limit) {
-            costs.insert(end - 1..end, LineCost { end, center, suffix: normal });
         }
     }
 }
@@ -205,11 +225,25 @@ pub fn balanced_flex_line_ends(
     main_limit: Option<f32>,
     minimum_line_count: NonZeroU32,
 ) -> Vec<usize> {
-    let count = item_sizes.len();
+    let items = item_sizes
+        .iter()
+        .map(|&outer_size| BalancedItem { outer_size, trimmed_margins: Line { start: 0.0, end: 0.0 } })
+        .collect::<Vec<_>>();
+    balanced_flex_line_ends_with_trim(&items, main_gap, main_limit, minimum_line_count)
+}
+
+/// Balance using each candidate line's trimmed outer main sizes.
+pub(super) fn balanced_flex_line_ends_with_trim(
+    items: &[BalancedItem],
+    main_gap: f32,
+    main_limit: Option<f32>,
+    minimum_line_count: NonZeroU32,
+) -> Vec<usize> {
+    let count = items.len();
     if count == 0 {
         return Vec::new();
     }
-    let input = BalanceInput::new(item_sizes, main_gap, main_limit);
+    let input = BalanceInput::new(items, main_gap, main_limit);
     let line_count = input.greedy_line_count().max(minimum_line_count.get() as usize).min(count);
     if line_count == count {
         return (1..=count).collect();
@@ -224,24 +258,38 @@ pub fn balanced_flex_line_ends(
     let mut breaks: Vec<Vec<usize>> = Vec::new();
     for lines in 1..=line_count {
         let starts = count - lines + 1;
-        let mut costs = IntervalCosts::new(&input.prefix[..starts]);
-        for end in 1..=count {
-            input.insert_suffix(&mut costs, end, previous[end], previous_singleton[end]);
+        let mut order = (0..starts).collect::<Vec<_>>();
+        order.sort_by(|&a, &b| input.starts[a].total_cmp(&input.starts[b]));
+        let coordinates = order.iter().map(|&start| input.starts[start]).collect::<Vec<_>>();
+        let mut ranks = (0..starts).map(|_| 0).collect::<Vec<_>>();
+        for (rank, start) in order.into_iter().enumerate() {
+            ranks[start] = rank;
         }
+        let mut costs = IntervalCosts::new(&coordinates);
         let mut current: Vec<f64> = (0..=count).map(|_| f64::INFINITY).collect();
         let mut current_singleton = current.clone();
         let mut next_break: Vec<usize> = (0..starts).map(|_| 0).collect();
-        for start in 0..starts {
-            if let Some(best) = costs.best(start) {
-                current[start] = best.at(input.prefix[start]);
-                next_break[start] = best.end;
+        for start in (0..starts).rev() {
+            let end = start + 2;
+            if end <= count {
+                input.insert_suffix(&mut costs, end, previous[end], previous_singleton[end]);
             }
             let suffix = if input.forces_singleton(start, start + 1) {
                 previous_singleton[start + 1]
             } else {
                 previous[start + 1]
             };
-            current_singleton[start] = input.sizes[start] * input.sizes[start] + suffix;
+            let error = input.singletons[start] - input.limit.unwrap_or(0.0);
+            current_singleton[start] = error * error + suffix;
+            current[start] = current_singleton[start];
+            next_break[start] = start + 1;
+            if let Some(best) = costs.best(ranks[start]) {
+                let cost = best.at(input.starts[start]);
+                if cost <= current[start] {
+                    current[start] = cost;
+                    next_break[start] = best.end;
+                }
+            }
         }
         previous = current;
         previous_singleton = current_singleton;
@@ -263,6 +311,108 @@ pub fn balanced_flex_line_ends(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn exhaustive_trim(items: &[BalancedItem], gap: f32, limit: Option<f32>, minimum: usize) -> Vec<usize> {
+        let length = |start: usize, end: usize| {
+            items[start..end]
+                .iter()
+                .enumerate()
+                .map(|(index, item)| {
+                    let start_margin = if index == 0 { item.trimmed_margins.start } else { 0.0 };
+                    let end_margin = if start + index + 1 == end { item.trimmed_margins.end } else { 0.0 };
+                    f64::from((item.outer_size - start_margin - end_margin).max(0.0))
+                })
+                .sum::<f64>()
+                + f64::from(gap) * (end - start - 1) as f64
+        };
+        let fits = |length: f64| limit.map_or(true, |limit| length <= f64::from(limit));
+        let mut line_count = 1;
+        let mut start = 0;
+        for end in 1..=items.len() {
+            if end > start + 1 && !fits(length(start, end)) {
+                line_count += 1;
+                start = end - 1;
+            }
+        }
+        let line_count = line_count.max(minimum).min(items.len());
+        let mut best: Option<(f64, Vec<usize>)> = None;
+        for mask in 0..1usize << items.len().saturating_sub(1) {
+            let ends: Vec<_> = (1..items.len())
+                .filter(|index| mask & (1 << (index - 1)) != 0)
+                .chain(core::iter::once(items.len()))
+                .collect();
+            if ends.len() != line_count {
+                continue;
+            }
+            let mut start = 0;
+            let mut cost = 0.0;
+            let mut valid = true;
+            for (line, &end) in ends.iter().enumerate() {
+                let width = length(start, end);
+                if end - start > 1 && !fits(width) {
+                    valid = false;
+                }
+                if end < items.len()
+                    && items[end].outer_size - items[end].trimmed_margins.end <= 0.0
+                    && fits(width)
+                    && fits(length(start, end + 1))
+                    && ends[line + 1] > end + 1
+                {
+                    valid = false;
+                }
+                let error = width - f64::from(limit.unwrap_or(0.0));
+                cost += error * error;
+                start = end;
+            }
+            if valid
+                && best
+                    .as_ref()
+                    .map_or(true, |(previous, indices)| cost < *previous || (cost == *previous && ends > *indices))
+            {
+                best = Some((cost, ends));
+            }
+        }
+        best.expect("a partition with the greedy line count exists").1
+    }
+
+    #[test]
+    fn trimmed_balance_matches_exhaustive_partitions() {
+        for count in 1..=4 {
+            for encoded in 0usize..8usize.pow(count) {
+                let mut value = encoded;
+                let items: Vec<_> = (0..count)
+                    .map(|_| {
+                        let (outer_size, start, end) = [
+                            (40.0, 10.0, 10.0),
+                            (0.0, 0.0, 0.0),
+                            (5.0, -10.0, 10.0),
+                            (-5.0, -10.0, 0.0),
+                            (20.0, 0.0, -10.0),
+                            (20.0, 30.0, -10.0),
+                            (30.0, 10.0, 10.0),
+                            (20.0, 0.0, 0.0),
+                        ][value % 8];
+                        value /= 8;
+                        BalancedItem { outer_size, trimmed_margins: Line { start, end } }
+                    })
+                    .collect();
+                for gap in [0.0, 2.0] {
+                    for limit in [None, Some(20.0), Some(50.0)] {
+                        for minimum in [1, 2, 3] {
+                            let actual = balanced_flex_line_ends_with_trim(
+                                &items,
+                                gap,
+                                limit,
+                                NonZeroU32::new(minimum).unwrap(),
+                            );
+                            let expected = exhaustive_trim(&items, gap, limit, minimum as usize);
+                            assert_eq!(actual, expected, "{items:?}; gap {gap}; limit {limit:?}; minimum {minimum}");
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     fn exhaustive(sizes: &[f32], gap: f32, limit: Option<f32>, minimum: usize) -> Vec<usize> {
         let mut best: Option<(usize, f64, Vec<usize>)> = None;

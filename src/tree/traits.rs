@@ -252,6 +252,12 @@ pub trait LayoutFlexboxContainer: LayoutPartialTree {
 
     /// Get the child's styles
     fn get_flexbox_child_style(&self, child_node_id: NodeId) -> Self::FlexboxItemStyle<'_>;
+
+    /// Store the container's line partition for consumers that need flex line membership.
+    #[cfg(feature = "detailed_layout_info")]
+    fn set_detailed_flex_info(&mut self, _node_id: NodeId, _info: crate::DetailedFlexInfo) {
+        debug_log!("LayoutFlexboxContainer::set_detailed_flex_info called");
+    }
 }
 
 #[cfg(feature = "grid")]

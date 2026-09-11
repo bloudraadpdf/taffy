@@ -1,7 +1,157 @@
 #[cfg(test)]
-mod min_max_overrides {
+mod tests {
     use taffy::prelude::*;
     use taffy_test_helpers::new_test_tree;
+
+    #[test]
+    fn intrinsic_flex_contributions_transfer_the_known_cross_size() {
+        for direction in [FlexDirection::Row, FlexDirection::Column] {
+            for box_sizing in [BoxSizing::ContentBox, BoxSizing::BorderBox] {
+                for padding in [0.0, 5.0] {
+                    let row = direction == FlexDirection::Row;
+                    let edges = 2.0 * padding;
+                    let expected_main =
+                        if box_sizing == BoxSizing::ContentBox { 2.0 * (20.0 - edges) + edges } else { 40.0 };
+                    let mut tree = new_test_tree();
+                    let child = tree
+                        .new_leaf(Style {
+                            box_sizing,
+                            item_is_replaced: true,
+                            flex_basis: length(
+                                expected_main - if box_sizing == BoxSizing::ContentBox { edges } else { 0.0 },
+                            ),
+                            min_size: Size::zero(),
+                            padding: Rect::length(padding),
+                            aspect_ratio: Some(if row { 2.0 } else { 0.5 }),
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    let parent = tree
+                        .new_with_children(
+                            Style {
+                                display: Display::Flex,
+                                flex_direction: direction,
+                                size: if row {
+                                    Size { width: auto(), height: length(20.0) }
+                                } else {
+                                    Size { width: length(20.0), height: auto() }
+                                },
+                                ..Default::default()
+                            },
+                            &[child],
+                        )
+                        .unwrap();
+                    tree.compute_layout_with_measure(parent, Size::MAX_CONTENT, |_, _, _, _, _| Size::length(1.0))
+                        .unwrap();
+                    for node in [parent, child] {
+                        let size = tree.layout(node).unwrap().size;
+                        assert_eq!(
+                            size,
+                            if row {
+                                Size { width: expected_main, height: 20.0 }
+                            } else {
+                                Size { width: 20.0, height: expected_main }
+                            },
+                            "{direction:?}; {box_sizing:?}; {padding}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn intrinsic_flex_cross_sizes_use_the_flexed_main_size() {
+        use taffy::style::{FlexCrossIntrinsicBounds, FlexCrossSize};
+        for direction in [FlexDirection::Row, FlexDirection::Column] {
+            for (preferred, bounds, cross) in [
+                (FlexCrossSize::Content, FlexCrossIntrinsicBounds::None, 500.0),
+                (FlexCrossSize::Style, FlexCrossIntrinsicBounds::Minimum, 0.0),
+                (FlexCrossSize::Style, FlexCrossIntrinsicBounds::Maximum, 500.0),
+                (FlexCrossSize::Style, FlexCrossIntrinsicBounds::Both, 500.0),
+            ] {
+                let mut tree = new_test_tree();
+                let row = direction == FlexDirection::Row;
+                let child = tree
+                    .new_leaf(Style {
+                        size: if row {
+                            Size { width: length(140.0), height: length(cross) }
+                        } else {
+                            Size { width: length(cross), height: length(140.0) }
+                        },
+                        flex_shrink: 0.0,
+                        flex_cross_size: preferred,
+                        flex_cross_intrinsic_bounds: bounds,
+                        padding: Rect::length(5.0),
+                        ..Default::default()
+                    })
+                    .unwrap();
+                let parent = tree
+                    .new_with_children(
+                        Style {
+                            display: Display::Flex,
+                            flex_direction: direction,
+                            size: Size::length(100.0),
+                            ..Default::default()
+                        },
+                        &[child],
+                    )
+                    .unwrap();
+                tree.compute_layout_with_measure(parent, Size::MAX_CONTENT, |known, _, _, _, _| {
+                    let main = if row { known.width } else { known.height }.unwrap_or(140.0);
+                    let cross = if main >= 140.0 { 20.0 } else { 40.0 };
+                    if row {
+                        Size { width: main, height: cross }
+                    } else {
+                        Size { width: cross, height: main }
+                    }
+                })
+                .unwrap();
+                let actual = tree.layout(child).unwrap().size;
+                assert_eq!(
+                    if row { actual.height } else { actual.width },
+                    30.0,
+                    "{direction:?}; {preferred:?}; {bounds:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn grid_minimum_contributions_clamp_definite_preferred_sizes() {
+        for box_sizing in [BoxSizing::ContentBox, BoxSizing::BorderBox] {
+            for replaced in [false, true] {
+                for (preferred, minimum, maximum, expected) in
+                    [(100.0, 0.0, 50.0, 50.0), (100.0, 70.0, 50.0, 70.0), (10.0, 80.0, 500.0, 80.0)]
+                {
+                    let mut tree = new_test_tree();
+                    let child = tree
+                        .new_leaf(Style {
+                            box_sizing,
+                            item_is_replaced: replaced,
+                            size: Size::length(preferred),
+                            min_size: Size::length(minimum),
+                            max_size: Size::length(maximum),
+                            padding: Rect::length(5.0),
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    let grid = tree
+                        .new_with_children(Style { display: Display::Grid, ..Default::default() }, &[child])
+                        .unwrap();
+                    tree.compute_layout(grid, Size::MAX_CONTENT).unwrap();
+                    let expected = expected + if box_sizing == BoxSizing::ContentBox { 10.0 } else { 0.0 };
+                    for node in [grid, child] {
+                        assert_eq!(
+                            tree.layout(node).unwrap().size,
+                            Size { width: expected, height: expected },
+                            "{box_sizing:?}; replaced:{replaced}; preferred:{preferred}; min:{minimum}; max:{maximum}"
+                        );
+                    }
+                }
+            }
+        }
+    }
 
     #[test]
     fn conflicting_grid_bounds_use_the_minimum_when_sizing_flexible_tracks() {

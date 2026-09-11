@@ -245,6 +245,9 @@ fn build_style<S: CheapCloneStr>(xnode: roxmltree::Node) -> taffy::Style<S> {
         parse_or_default(xnode.attribute("grid-template-columns"));
 
     taffy::Style {
+        flex_cross_size: taffy::style::FlexCrossSize::Style,
+        flex_cross_intrinsic_bounds: taffy::style::FlexCrossIntrinsicBounds::None,
+        margin_trim: Default::default(),
         grid_auto_repeat_constraints: None,
         dummy: std::marker::PhantomData,
         display: parse_or_default(xnode.attribute("display")),

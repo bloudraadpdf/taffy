@@ -60,7 +60,7 @@ grid = ["alloc", "dep:smallvec"]
 calc = []
 ## Causes all algorithms to compute and output a content size for each node
 content_size = []
-## Causes algorithms to stores detailed information of the nodes in TaffyTree, with only CSS Grid supporting this.
+## Stores detailed grid and flex layout information in TaffyTree.
 detailed_layout_info = []
 ## Use strict provenance APIs for pointer manipulation. Using this feature requires Rust 1.84 or higher.
 strict_provenance = []

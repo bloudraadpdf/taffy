@@ -618,18 +618,21 @@ impl GridItem {
         let preferred_size_basis =
             preferred_size_basis(grid_area_size, axis, IntrinsicContribution::Minimum, self.is_compressible_replaced);
         let minimum_size_basis = minimum_size_basis(grid_area_size, axis);
-        self.size
+        if self
+            .size
             .maybe_resolve(preferred_size_basis, |val, basis| tree.calc(val, basis))
             .maybe_apply_aspect_ratio(self.aspect_ratio)
             .maybe_add(box_sizing_adjustment)
             .get(axis)
-            .or_else(|| {
-                self.min_size
-                    .maybe_resolve(minimum_size_basis, |val, basis| tree.calc(val, basis))
-                    .maybe_apply_aspect_ratio(self.aspect_ratio)
-                    .maybe_add(box_sizing_adjustment)
-                    .get(axis)
-            })
+            .is_some()
+        {
+            return self.min_content_contribution_cached(axis, tree, grid_area_size, item_inline_axis, grid_area_size);
+        }
+        self.min_size
+            .maybe_resolve(minimum_size_basis, |val, basis| tree.calc(val, basis))
+            .maybe_apply_aspect_ratio(self.aspect_ratio)
+            .maybe_add(box_sizing_adjustment)
+            .get(axis)
             .or_else(|| self.overflow.get(axis).maybe_into_automatic_min_size())
             .unwrap_or_else(|| {
                 // Automatic minimum size. See https://www.w3.org/TR/css-grid-1/#min-size-auto

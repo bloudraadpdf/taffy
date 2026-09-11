@@ -1,6 +1,6 @@
 //! Style types for Flexbox layout
 use super::{AlignContent, AlignItems, AlignSelf, CoreStyle, Dimension, JustifyContent, LengthPercentage, Style};
-use crate::geometry::Size;
+use crate::geometry::{Rect, Size};
 
 /// The set of styles required for a Flexbox container
 pub trait FlexboxContainerStyle: CoreStyle {
@@ -19,6 +19,12 @@ pub trait FlexboxContainerStyle: CoreStyle {
     #[inline(always)]
     fn flex_line_count(&self) -> core::num::NonZeroU32 {
         Style::<Self::CustomIdent>::DEFAULT.flex_line_count
+    }
+
+    /// Physical container edges at which adjacent item margins are discarded.
+    #[inline(always)]
+    fn margin_trim(&self) -> Rect<bool> {
+        Style::<Self::CustomIdent>::DEFAULT.margin_trim
     }
 
     /// How large should the gaps between items in a grid or flex container be?
@@ -48,6 +54,16 @@ pub trait FlexboxContainerStyle: CoreStyle {
 
 /// The set of styles required for a Flexbox item (child of a Flexbox container)
 pub trait FlexboxItemStyle: CoreStyle {
+    /// How the item's preferred cross size is determined.
+    #[inline(always)]
+    fn flex_cross_size(&self) -> FlexCrossSize {
+        Style::<Self::CustomIdent>::DEFAULT.flex_cross_size
+    }
+    /// Intrinsic cross bounds measured after flexing the main size.
+    #[inline(always)]
+    fn flex_cross_intrinsic_bounds(&self) -> FlexCrossIntrinsicBounds {
+        Style::<Self::CustomIdent>::DEFAULT.flex_cross_intrinsic_bounds
+    }
     /// Sets the initial main axis size of the item
     #[inline(always)]
     fn flex_basis(&self) -> Dimension {
@@ -73,6 +89,46 @@ pub trait FlexboxItemStyle: CoreStyle {
 }
 
 use crate::geometry::AbsoluteAxis;
+
+/// Preferred cross sizing before and after flex line construction.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FlexCrossSize {
+    /// Use the cross-axis component of `size`.
+    #[default]
+    Style,
+    /// Stretch the margin box to the container during measurement, then to its line.
+    Stretch,
+    /// Use the content size measured with the final main size.
+    Content,
+}
+
+/// Cross bounds that depend on layout at the final main size.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FlexCrossIntrinsicBounds {
+    /// Use the style's resolved bounds.
+    #[default]
+    None,
+    /// Measure the minimum cross size.
+    Minimum,
+    /// Measure the maximum cross size.
+    Maximum,
+    /// Measure both cross bounds.
+    Both,
+}
+
+impl FlexCrossIntrinsicBounds {
+    /// Whether the minimum uses the measured content size.
+    pub(crate) fn minimum(self) -> bool {
+        matches!(self, Self::Minimum | Self::Both)
+    }
+
+    /// Whether the maximum uses the measured content size.
+    pub(crate) fn maximum(self) -> bool {
+        matches!(self, Self::Maximum | Self::Both)
+    }
+}
 
 /// Controls whether flex items are forced onto one line or can wrap onto multiple lines.
 ///

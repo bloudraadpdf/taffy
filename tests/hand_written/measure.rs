@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod measure {
+mod tests {
     use taffy::prelude::*;
     use taffy_test_helpers::{new_test_tree, test_measure_function, TestNodeContext};
 

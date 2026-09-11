@@ -3,7 +3,7 @@
 //!
 //! These tests are primarily about layout *terminating* without panicking.
 #[cfg(test)]
-mod adversarial_styles {
+mod tests {
     use taffy::prelude::*;
     use taffy_test_helpers::new_test_tree;
 

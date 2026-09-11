@@ -502,6 +502,11 @@ where
     fn get_flexbox_child_style(&self, child_node_id: NodeId) -> Self::FlexboxItemStyle<'_> {
         &self.taffy.nodes[child_node_id.into()].style
     }
+
+    #[cfg(feature = "detailed_layout_info")]
+    fn set_detailed_flex_info(&mut self, node_id: NodeId, info: crate::DetailedFlexInfo) {
+        self.taffy.nodes[node_id.into()].detailed_layout_info = DetailedLayoutInfo::Flex(Box::new(info));
+    }
 }
 
 #[cfg(feature = "grid")]

@@ -1,5 +1,5 @@
 #[cfg(test)]
-mod root_constraints {
+mod tests {
     use taffy::prelude::{FromLength, FromPercent};
     use taffy::style_helpers::{length, TaffyMaxContent};
     use taffy::{AvailableSpace, Rect, Size, Style, TaffyTree};

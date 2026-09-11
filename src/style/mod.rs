@@ -25,7 +25,9 @@ use crate::sys::DefaultCheapStr;
 #[cfg(feature = "block_layout")]
 pub use self::block::{BlockContainerStyle, BlockItemStyle, TextAlign};
 #[cfg(feature = "flexbox")]
-pub use self::flex::{FlexDirection, FlexWrap, FlexboxContainerStyle, FlexboxItemStyle};
+pub use self::flex::{
+    FlexCrossIntrinsicBounds, FlexCrossSize, FlexDirection, FlexWrap, FlexboxContainerStyle, FlexboxItemStyle,
+};
 #[cfg(feature = "float_layout")]
 pub use self::float::{Clear, Float, FloatDirection};
 #[cfg(feature = "grid")]
@@ -546,8 +548,16 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Minimum line count and divisor for available cross space.
     #[cfg(feature = "flexbox")]
     pub flex_line_count: core::num::NonZeroU32,
+    /// Physical container edges at which adjacent item margins are discarded.
+    #[cfg(feature = "flexbox")]
+    pub margin_trim: Rect<bool>,
 
     // Flexbox item properties
+    /// How the item's preferred cross size is determined.
+    #[cfg(feature = "flexbox")]
+    pub flex_cross_size: FlexCrossSize,
+    /// Intrinsic cross bounds measured with the final main size.
+    pub flex_cross_intrinsic_bounds: FlexCrossIntrinsicBounds,
     /// Sets the initial main axis size of the item
     #[cfg(feature = "flexbox")]
     pub flex_basis: Dimension,
@@ -655,11 +665,16 @@ impl<S: CheapCloneStr> Style<S> {
         #[cfg(feature = "flexbox")]
         flex_line_count: core::num::NonZeroU32::MIN,
         #[cfg(feature = "flexbox")]
+        margin_trim: Rect { left: false, right: false, top: false, bottom: false },
+        #[cfg(feature = "flexbox")]
         flex_grow: 0.0,
         #[cfg(feature = "flexbox")]
         flex_shrink: 1.0,
         #[cfg(feature = "flexbox")]
         flex_basis: Dimension::AUTO,
+        #[cfg(feature = "flexbox")]
+        flex_cross_size: FlexCrossSize::Style,
+        flex_cross_intrinsic_bounds: FlexCrossIntrinsicBounds::None,
         // Grid
         #[cfg(feature = "grid")]
         grid_template_rows: GridTrackVec::new(),
@@ -917,6 +932,10 @@ impl<S: CheapCloneStr> FlexboxContainerStyle for Style<S> {
         self.flex_line_count
     }
     #[inline(always)]
+    fn margin_trim(&self) -> Rect<bool> {
+        self.margin_trim
+    }
+    #[inline(always)]
     fn gap(&self) -> Size<LengthPercentage> {
         self.gap
     }
@@ -949,6 +968,10 @@ impl<T: FlexboxContainerStyle> FlexboxContainerStyle for &'_ T {
         (*self).flex_line_count()
     }
     #[inline(always)]
+    fn margin_trim(&self) -> Rect<bool> {
+        (*self).margin_trim()
+    }
+    #[inline(always)]
     fn gap(&self) -> Size<LengthPercentage> {
         (*self).gap()
     }
@@ -969,6 +992,14 @@ impl<T: FlexboxContainerStyle> FlexboxContainerStyle for &'_ T {
 #[cfg(feature = "flexbox")]
 impl<S: CheapCloneStr> FlexboxItemStyle for Style<S> {
     #[inline(always)]
+    fn flex_cross_size(&self) -> FlexCrossSize {
+        self.flex_cross_size
+    }
+    #[inline(always)]
+    fn flex_cross_intrinsic_bounds(&self) -> FlexCrossIntrinsicBounds {
+        self.flex_cross_intrinsic_bounds
+    }
+    #[inline(always)]
     fn flex_basis(&self) -> Dimension {
         self.flex_basis
     }
@@ -988,6 +1019,14 @@ impl<S: CheapCloneStr> FlexboxItemStyle for Style<S> {
 
 #[cfg(feature = "flexbox")]
 impl<T: FlexboxItemStyle> FlexboxItemStyle for &'_ T {
+    #[inline(always)]
+    fn flex_cross_size(&self) -> FlexCrossSize {
+        (*self).flex_cross_size()
+    }
+    #[inline(always)]
+    fn flex_cross_intrinsic_bounds(&self) -> FlexCrossIntrinsicBounds {
+        (*self).flex_cross_intrinsic_bounds()
+    }
     #[inline(always)]
     fn flex_basis(&self) -> Dimension {
         (*self).flex_basis()
@@ -1292,6 +1331,8 @@ mod tests {
             flex_wrap: Default::default(),
             #[cfg(feature = "flexbox")]
             flex_line_count: core::num::NonZeroU32::MIN,
+            #[cfg(feature = "flexbox")]
+            margin_trim: Rect { left: false, right: false, top: false, bottom: false },
             #[cfg(any(feature = "flexbox", feature = "grid"))]
             align_items: Default::default(),
             #[cfg(any(feature = "flexbox", feature = "grid"))]
@@ -1317,6 +1358,9 @@ mod tests {
             flex_shrink: 1.0,
             #[cfg(feature = "flexbox")]
             flex_basis: super::Dimension::AUTO,
+            #[cfg(feature = "flexbox")]
+            flex_cross_size: super::FlexCrossSize::Style,
+            flex_cross_intrinsic_bounds: super::FlexCrossIntrinsicBounds::None,
             size: Size::auto(),
             min_size: Size::auto(),
             max_size: Size::auto(),
@@ -1408,6 +1452,8 @@ mod tests {
         // Flexbox Container
         assert_type_size::<FlexDirection>(1);
         assert_type_size::<FlexWrap>(1);
+        assert_type_size::<FlexCrossSize>(1);
+        assert_type_size::<FlexCrossIntrinsicBounds>(1);
 
         // CSS Grid Container
         assert_type_size::<GridAutoFlow>(1);
@@ -1423,12 +1469,12 @@ mod tests {
         assert_type_size::<GridTemplateComponent<String>>(56);
         assert_type_size::<GridPlacement<String>>(32);
         assert_type_size::<Line<GridPlacement<String>>>(64);
-        assert_type_size::<Style<String>>(616);
+        assert_type_size::<Style<String>>(624);
 
         // String-type dependent (Arc<str>)
         assert_type_size::<GridTemplateComponent<Arc<str>>>(56);
         assert_type_size::<GridPlacement<Arc<str>>>(24);
         assert_type_size::<Line<GridPlacement<Arc<str>>>>(48);
-        assert_type_size::<Style<Arc<str>>>(584);
+        assert_type_size::<Style<Arc<str>>>(592);
     }
 }

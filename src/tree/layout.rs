@@ -389,6 +389,9 @@ impl Layout {
 #[cfg(feature = "detailed_layout_info")]
 #[derive(Debug, Clone, PartialEq)]
 pub enum DetailedLayoutInfo {
+    /// The flex container's line partition.
+    #[cfg(feature = "flexbox")]
+    Flex(Box<crate::DetailedFlexInfo>),
     /// Enum variant for [`DetailedGridInfo`](crate::compute::grid::DetailedGridInfo)
     #[cfg(feature = "grid")]
     Grid(Box<crate::compute::grid::DetailedGridInfo>),
