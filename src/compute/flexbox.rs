@@ -146,10 +146,20 @@ struct FlexLine<'a> {
     offset_cross: f32,
 }
 
+impl FlexLine<'_> {
+    /// Sum hypothetical margin boxes and intervening gaps.
+    fn hypothetical_main_size(&self, constants: &AlgoConstants) -> f32 {
+        self.items.iter().map(|child| child.hypothetical_outer_size.main(constants.dir)).sum::<f32>()
+            + sum_axis_gaps(constants.gap.main(constants.dir), self.items.len())
+    }
+}
+
 /// Values that can be cached during the flexbox algorithm
 struct AlgoConstants {
     /// The direction of the current segment being laid out
     dir: FlexDirection,
+    /// Item contributions used to size an indefinite main axis.
+    main_sizing: crate::style::FlexMainSizing,
     /// The layout direction of the current segment being laid out
     layout_direction: Direction,
     /// Is this segment a row
@@ -539,6 +549,7 @@ fn compute_constants(
 
     AlgoConstants {
         dir,
+        main_sizing: style.flex_main_sizing(),
         layout_direction,
         is_row,
         is_column,
@@ -1167,6 +1178,10 @@ fn determine_container_main_size(
     let main_content_box_inset = constants.content_box_inset.main_axis_sum(constants.dir);
 
     let outer_main_size: f32 = constants.node_outer_size.main(constants.dir).unwrap_or_else(|| {
+        if constants.main_sizing == crate::style::FlexMainSizing::HypotheticalItems {
+            return lines.iter().map(|line| line.hypothetical_main_size(constants)).fold(0.0, f32_max)
+                + main_content_box_inset;
+        }
         match available_space.main(dir) {
             AvailableSpace::Definite(main_axis_available_space) => {
                 let longest_line_length: f32 = lines
@@ -1348,9 +1363,7 @@ fn resolve_flexible_lengths(line: &mut FlexLine, constants: &AlgoConstants) {
     //    use the flex grow factor for the rest of this algorithm; otherwise, use the
     //    flex shrink factor.
 
-    let total_hypothetical_outer_main_size =
-        line.items.iter().map(|child| child.hypothetical_outer_size.main(constants.dir)).sum::<f32>();
-    let used_flex_factor: f32 = total_main_axis_gap + total_hypothetical_outer_main_size;
+    let used_flex_factor = line.hypothetical_main_size(constants);
     let growing = used_flex_factor < constants.node_inner_size.main(constants.dir).unwrap_or(0.0);
     let shrinking = used_flex_factor > constants.node_inner_size.main(constants.dir).unwrap_or(0.0);
     let exactly_sized = !growing & !shrinking;

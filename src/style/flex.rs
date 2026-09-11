@@ -9,6 +9,11 @@ pub trait FlexboxContainerStyle: CoreStyle {
     fn flex_direction(&self) -> FlexDirection {
         Style::<Self::CustomIdent>::DEFAULT.flex_direction
     }
+    /// How an indefinite main size is derived from the items.
+    #[inline(always)]
+    fn flex_main_sizing(&self) -> FlexMainSizing {
+        Style::<Self::CustomIdent>::DEFAULT.flex_main_sizing
+    }
     /// Should elements wrap, or stay in a single line?
     #[inline(always)]
     fn flex_wrap(&self) -> FlexWrap {
@@ -89,6 +94,17 @@ pub trait FlexboxItemStyle: CoreStyle {
 }
 
 use crate::geometry::AbsoluteAxis;
+
+/// Item contributions used to size an indefinite flex main axis.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FlexMainSizing {
+    /// Use intrinsic contributions, including item flexibility.
+    #[default]
+    IntrinsicContributions,
+    /// Use hypothetical item sizes for web-compatible column block sizing.
+    HypotheticalItems,
+}
 
 /// Preferred cross sizing before and after flex line construction.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]

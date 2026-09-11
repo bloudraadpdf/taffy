@@ -26,7 +26,8 @@ use crate::sys::DefaultCheapStr;
 pub use self::block::{BlockContainerStyle, BlockItemStyle, TextAlign};
 #[cfg(feature = "flexbox")]
 pub use self::flex::{
-    FlexCrossIntrinsicBounds, FlexCrossSize, FlexDirection, FlexWrap, FlexboxContainerStyle, FlexboxItemStyle,
+    FlexCrossIntrinsicBounds, FlexCrossSize, FlexDirection, FlexMainSizing, FlexWrap, FlexboxContainerStyle,
+    FlexboxItemStyle,
 };
 #[cfg(feature = "float_layout")]
 pub use self::float::{Clear, Float, FloatDirection};
@@ -542,6 +543,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Which direction does the main axis flow in?
     #[cfg(feature = "flexbox")]
     pub flex_direction: FlexDirection,
+    /// How an indefinite main size is derived from the items.
+    #[cfg(feature = "flexbox")]
+    pub flex_main_sizing: FlexMainSizing,
     /// Should elements wrap, or stay in a single line?
     #[cfg(feature = "flexbox")]
     pub flex_wrap: FlexWrap,
@@ -660,6 +664,8 @@ impl<S: CheapCloneStr> Style<S> {
         // Flexbox
         #[cfg(feature = "flexbox")]
         flex_direction: FlexDirection::Row,
+        #[cfg(feature = "flexbox")]
+        flex_main_sizing: FlexMainSizing::IntrinsicContributions,
         #[cfg(feature = "flexbox")]
         flex_wrap: FlexWrap::NoWrap,
         #[cfg(feature = "flexbox")]
@@ -924,6 +930,10 @@ impl<S: CheapCloneStr> FlexboxContainerStyle for Style<S> {
         self.flex_direction
     }
     #[inline(always)]
+    fn flex_main_sizing(&self) -> FlexMainSizing {
+        self.flex_main_sizing
+    }
+    #[inline(always)]
     fn flex_wrap(&self) -> FlexWrap {
         self.flex_wrap
     }
@@ -958,6 +968,10 @@ impl<T: FlexboxContainerStyle> FlexboxContainerStyle for &'_ T {
     #[inline(always)]
     fn flex_direction(&self) -> FlexDirection {
         (*self).flex_direction()
+    }
+    #[inline(always)]
+    fn flex_main_sizing(&self) -> FlexMainSizing {
+        (*self).flex_main_sizing()
     }
     #[inline(always)]
     fn flex_wrap(&self) -> FlexWrap {
@@ -1327,6 +1341,8 @@ mod tests {
             position: Default::default(),
             #[cfg(feature = "flexbox")]
             flex_direction: Default::default(),
+            #[cfg(feature = "flexbox")]
+            flex_main_sizing: Default::default(),
             #[cfg(feature = "flexbox")]
             flex_wrap: Default::default(),
             #[cfg(feature = "flexbox")]
