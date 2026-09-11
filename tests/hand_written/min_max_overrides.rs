@@ -4,6 +4,63 @@ mod tests {
     use taffy_test_helpers::new_test_tree;
 
     #[test]
+    fn transferred_flex_limits_preserve_definite_preferred_sizes() {
+        for direction in [FlexDirection::Row, FlexDirection::Column] {
+            for replaced in [false, true] {
+                let row = direction == FlexDirection::Row;
+                let axes = |main, cross| {
+                    if row {
+                        Size { width: main, height: cross }
+                    } else {
+                        Size { width: cross, height: main }
+                    }
+                };
+                for (preferred, minimum, maximum, expected_main, expected_cross) in [
+                    (30.0, Size::zero(), axes(auto(), length(10.0)), 30.0, 10.0),
+                    (30.0, Size::zero(), axes(length(20.0), length(10.0)), 20.0, 10.0),
+                    (10.0, axes(auto(), length(30.0)), Size::auto(), 10.0, 30.0),
+                    (10.0, axes(length(20.0), length(30.0)), Size::auto(), 20.0, 30.0),
+                ] {
+                    let mut tree = new_test_tree();
+                    let child = tree
+                        .new_leaf(Style {
+                            item_is_replaced: replaced,
+                            size: axes(length(preferred), auto()),
+                            min_size: minimum,
+                            max_size: maximum,
+                            aspect_ratio: Some(1.0),
+                            ..Default::default()
+                        })
+                        .unwrap();
+                    let parent = tree
+                        .new_with_children(
+                            Style {
+                                display: Display::Flex,
+                                flex_direction: direction,
+                                align_items: Some(AlignItems::FLEX_START),
+                                size: Size::length(40.0),
+                                ..Default::default()
+                            },
+                            &[child],
+                        )
+                        .unwrap();
+                    tree.compute_layout(parent, Size::MAX_CONTENT).unwrap();
+                    let actual = tree.layout(child).unwrap().size;
+                    let expected = if row {
+                        Size { width: expected_main, height: expected_cross }
+                    } else {
+                        Size { width: expected_cross, height: expected_main }
+                    };
+                    assert_eq!(
+                        actual, expected,
+                        "{direction:?}; replaced:{replaced}; preferred:{preferred}; min:{minimum:?}; max:{maximum:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn intrinsic_flex_contributions_transfer_the_known_cross_size() {
         for direction in [FlexDirection::Row, FlexDirection::Column] {
             for box_sizing in [BoxSizing::ContentBox, BoxSizing::BorderBox] {
