@@ -1562,6 +1562,17 @@ fn determine_hypothetical_cross_size(
         let cross_size = tree.get_flexbox_child_style(child.node).flex_cross_size();
         let intrinsic_bounds = tree.get_flexbox_child_style(child.node).flex_cross_intrinsic_bounds();
         let box_sizing = tree.get_flexbox_child_style(child.node).box_sizing();
+        let adjustment =
+            if box_sizing == BoxSizing::ContentBox { (child.padding + child.border).sum_axes() } else { Size::ZERO };
+        let automatic_cross_minimum = {
+            let child_style = tree.get_flexbox_child_style(child.node);
+            child.aspect_ratio.is_some()
+                && !child_style.is_compressible_replaced()
+                && cross_size == crate::style::FlexCrossSize::Style
+                && child_style.size().cross(constants.dir).is_auto()
+                && child_style.min_size().cross(constants.dir).is_auto()
+                && !child.overflow.cross(constants.dir).is_scroll_container()
+        };
         let mut measure_cross = |known_cross, available_cross| {
             tree.measure_child_size(
                 child.node,
@@ -1578,6 +1589,7 @@ fn determine_hypothetical_cross_size(
         };
         if cross_size == crate::style::FlexCrossSize::Content
             || intrinsic_bounds != crate::style::FlexCrossIntrinsicBounds::None
+            || automatic_cross_minimum
         {
             let intrinsic = measure_cross(None, AvailableSpace::MaxContent);
             if cross_size == crate::style::FlexCrossSize::Content {
@@ -1589,12 +1601,14 @@ fn determine_hypothetical_cross_size(
             if intrinsic_bounds.maximum() {
                 child.max_size.set_cross(constants.dir, Some(intrinsic));
             }
+            if automatic_cross_minimum {
+                let (_, maximum) = child.transferred_size_limits(child.size, adjustment);
+                child.min_size.set_cross(constants.dir, Some(intrinsic.maybe_min(maximum.cross(constants.dir))));
+            }
         }
 
         // Sizes transferred through the aspect ratio clamp the hypothetical cross size
         // https://github.com/w3c/csswg-drafts/issues/10997
-        let adjustment =
-            if box_sizing == BoxSizing::ContentBox { (child.padding + child.border).sum_axes() } else { Size::ZERO };
         let (transferred_min_size, transferred_max_size) = child.transferred_size_limits(child.size, adjustment);
         let transferred_min_cross = transferred_min_size.cross(constants.dir);
         let transferred_max_cross = transferred_max_size.cross(constants.dir);
