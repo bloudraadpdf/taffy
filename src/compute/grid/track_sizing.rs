@@ -1492,7 +1492,7 @@ fn distribute_space_up_to_limits(
             .filter(|track| track_affected_property(track) + track.item_incurred_increase < track_limit(track))
             .filter(|track| track_is_affected(track))
             .map(|track| {
-                (track_limit(track) - track_affected_property(track) - track.item_incurred_increase)
+                (track_limit(track) - (track_affected_property(track) + track.item_incurred_increase))
                     / track_distribution_proportion(track)
             })
             .min_by(|a, b| a.total_cmp(b))
@@ -1513,4 +1513,40 @@ fn distribute_space_up_to_limits(
     }
 
     space_to_distribute
+}
+
+#[cfg(test)]
+mod rounding_tests {
+    use super::*;
+    use crate::style::{MaxTrackSizingFunction, MinTrackSizingFunction};
+    use crate::style_helpers::TaffyAuto;
+    use core::cell::Cell;
+
+    #[test]
+    fn growth_limit_rounding_does_not_stall_space_distribution() {
+        let mut track = GridTrack::new(MinTrackSizingFunction::AUTO, MaxTrackSizingFunction::AUTO);
+        track.base_size = f32::from_bits(0x429745a2);
+        track.item_incurred_increase = f32::from_bits(0x4397b74c);
+        track.growth_limit = f32::from_bits(0x43bd88b5);
+        let mut tracks = [track];
+        let inspections = Cell::new(0);
+        let available = f32::from_bits(0x4229df80);
+        let remaining = distribute_space_up_to_limits(
+            available,
+            &mut tracks,
+            |_| {
+                inspections.set(inspections.get() + 1);
+                assert!(inspections.get() < 20, "one track must converge without repeated zero increases");
+                true
+            },
+            |_| 1.0,
+            |track| track.base_size,
+            |track| track.growth_limit,
+        );
+        let track = &tracks[0];
+        let used = track.base_size + track.item_incurred_increase;
+        assert!(used >= track.growth_limit);
+        assert!((used - track.growth_limit).abs() < 0.001);
+        assert!(remaining < available && available - remaining < 0.001);
+    }
 }
