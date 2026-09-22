@@ -109,6 +109,52 @@ fn unconsumed_space_and_overflow_are_not_reported_as_filled() {
 }
 
 #[test]
+fn a_single_item_retains_its_aligned_edge_with_fractional_free_space() {
+    for rtl in [false, true] {
+        for reverse in [false, true] {
+            for end in [false, true] {
+                for extent in [45.000004, 175.00002] {
+                    let mut tree: TaffyTree<()> = TaffyTree::new();
+                    tree.disable_rounding();
+                    let item = tree
+                        .new_leaf(Style {
+                            size: Size { width: length(extent), height: length(10.0) },
+                            flex_shrink: 0.0,
+                            ..Style::default()
+                        })
+                        .unwrap();
+                    let root = tree
+                        .new_with_children(
+                            Style {
+                                size: Size { width: length(165.0), height: auto() },
+                                direction: if rtl { Direction::Rtl } else { Direction::Ltr },
+                                flex_direction: if reverse { FlexDirection::RowReverse } else { FlexDirection::Row },
+                                justify_content: Some(if end {
+                                    JustifyContent::FLEX_END
+                                } else {
+                                    JustifyContent::FLEX_START
+                                }),
+                                ..Style::default()
+                            },
+                            &[item],
+                        )
+                        .unwrap();
+                    tree.compute_layout(root, Size::MAX_CONTENT).unwrap();
+                    let at_end = rtl ^ reverse ^ end;
+                    assert_eq!(
+                        anchors(&tree, root, item).width,
+                        Some(if at_end { FlexItemEdgeAnchor::End(0.0) } else { FlexItemEdgeAnchor::Start(0.0) })
+                    );
+                    if !at_end {
+                        assert_eq!(tree.unrounded_layout(item).location.x, 0.0);
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
 fn edge_constraints_include_physical_insets_margins_and_relative_position() {
     for rtl in [false, true] {
         for reverse in [false, true] {

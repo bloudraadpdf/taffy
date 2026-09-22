@@ -106,7 +106,7 @@ fn collect(lines: &[FlexLine], constants: &AlgoConstants) -> Vec<DetailedFlexIte
                 };
                 edge_anchors.set_main(direction, Some(edge));
             }
-            if last {
+            if last && (!first || line.leading_main_space != 0.0) {
                 let edge = if rtl {
                     FlexItemEdgeAnchor::Start(
                         constants.content_box_inset.main_start(direction)
