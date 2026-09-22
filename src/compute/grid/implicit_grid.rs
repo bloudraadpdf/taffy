@@ -139,7 +139,7 @@ fn child_min_line_max_line_span<S: CheapCloneStr>(
         (Line(track), Span(_)) => track,
 
         // End track specified
-        (Auto, Line(track)) => track,
+        (Auto, Line(track)) => track - 1,
         (Span(span), Line(track)) => track - span,
 
         // Only spans or autos
@@ -254,6 +254,20 @@ mod tests {
             assert_eq!(block.negative_implicit, 3);
             assert_eq!(block.explicit, explicit_row_count);
             assert_eq!(block.positive_implicit, 0);
+        }
+
+        #[test]
+        fn automatic_start_before_first_line_does_not_create_a_trailing_track() {
+            let child_styles = [(auto(), line(1), auto(), line(1)).into_grid_child()];
+            for direction in [Direction::Ltr, Direction::Rtl] {
+                let (columns, rows) = compute_grid_size_estimate(0, 0, direction, child_styles.iter());
+                assert_eq!(columns.explicit, 0);
+                assert_eq!(rows.explicit, 0);
+                assert_eq!(rows.negative_implicit, 1);
+                assert_eq!(rows.positive_implicit, 0);
+                let expected = if direction.is_rtl() { (0, 1) } else { (1, 0) };
+                assert_eq!((columns.negative_implicit, columns.positive_implicit), expected);
+            }
         }
     }
 }

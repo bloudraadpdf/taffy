@@ -38,6 +38,9 @@ struct FlexItem {
     /// The order of the node relative to it's siblings
     order: u32,
 
+    /// The original line cross size of a collapsed item in the second pass.
+    collapse_strut: Option<f32>,
+
     /// The base size of this item
     size: Size<Option<f32>>,
     /// The minimum allowable size of this item
@@ -144,9 +147,27 @@ struct FlexLine<'a> {
     cross_size: f32,
     /// The relative offset of the cross-axis
     offset_cross: f32,
+    /// Minimum cross extent retained by collapsed items on this line.
+    strut_cross_size: f32,
 }
 
-impl FlexLine<'_> {
+impl<'a> FlexLine<'a> {
+    /// Create a line before its visible items and collapse struts are separated.
+    fn new(items: &'a mut [FlexItem]) -> Self {
+        Self { items, cross_size: 0.0, offset_cross: 0.0, strut_cross_size: 0.0 }
+    }
+
+    /// Retain only participating items while preserving the maximum strut height.
+    fn retain_visible_items(&mut self) {
+        self.strut_cross_size = self.items.iter().filter_map(|item| item.collapse_strut).fold(0.0, f32::max);
+        if !self.items.iter().any(|item| item.collapse_strut.is_some()) {
+            return;
+        }
+        let items = core::mem::take(&mut self.items);
+        items.sort_by_key(|item| item.collapse_strut.is_some());
+        let visible_count = items.iter().take_while(|item| item.collapse_strut.is_none()).count();
+        self.items = &mut items[..visible_count];
+    }
     /// Sum hypothetical margin boxes and intervening gaps.
     fn hypothetical_main_size(&self, constants: &AlgoConstants) -> f32 {
         self.items.iter().map(|child| child.hypothetical_outer_size.main(constants.dir)).sum::<f32>()
@@ -285,11 +306,16 @@ pub fn compute_flexbox_layout(
     debug_log!("FLEX:", dbg:style.flex_direction());
     drop(style);
 
-    compute_preliminary(tree, node, LayoutInput { known_dimensions: styled_based_known_dimensions, ..inputs })
+    compute_preliminary(tree, node, LayoutInput { known_dimensions: styled_based_known_dimensions, ..inputs }, None)
 }
 
 /// Compute a preliminary size for an item
-fn compute_preliminary(tree: &mut impl LayoutFlexboxContainer, node: NodeId, inputs: LayoutInput) -> LayoutOutput {
+fn compute_preliminary(
+    tree: &mut impl LayoutFlexboxContainer,
+    node: NodeId,
+    inputs: LayoutInput,
+    collapse_struts: Option<&[(NodeId, f32)]>,
+) -> LayoutOutput {
     let LayoutInput { known_dimensions, parent_size, inline_percentage_basis, available_space, run_mode, .. } = inputs;
 
     // Define some general constants we will need for the remainder of the algorithm.
@@ -324,6 +350,15 @@ fn compute_preliminary(tree: &mut impl LayoutFlexboxContainer, node: NodeId, inp
     // 3. Determine the flex base size and hypothetical main size of each item.
     debug_log!("determine_flex_base_size");
     determine_flex_base_size(tree, &constants, available_space, &mut flex_items);
+    if let Some(struts) = collapse_struts {
+        for item in &mut flex_items {
+            if let Some(&(_, cross)) = struts.iter().find(|&&(node, _)| node == item.node) {
+                item.collapse_strut = Some(cross);
+                item.hypothetical_outer_size.set_main(constants.dir, 0.0);
+                item.margin = Rect::zero();
+            }
+        }
+    }
 
     #[cfg(feature = "debug")]
     for item in flex_items.iter() {
@@ -397,20 +432,21 @@ fn compute_preliminary(tree: &mut impl LayoutFlexboxContainer, node: NodeId, inp
     debug_log!("handle_align_content_stretch");
     handle_align_content_stretch(&mut flex_lines, known_dimensions, &constants);
 
-    // 10. Collapse visibility:collapse items. If any flex items have visibility: collapse,
-    //     note the cross size of the line they’re in as the item’s strut size, and restart
-    //     layout from the beginning.
-    //
-    //     In this second layout round, when collecting items into lines, treat the collapsed
-    //     items as having zero main size. For the rest of the algorithm following that step,
-    //     ignore the collapsed items entirely (as if they were display:none) except that after
-    //     calculating the cross size of the lines, if any line’s cross size is less than the
-    //     largest strut size among all the collapsed items in the line, set its cross size to
-    //     that strut size.
-    //
-    //     Skip this step in the second layout round.
-
-    // TODO implement once (if ever) we support visibility:collapse
+    if collapse_struts.is_none() {
+        let struts = flex_lines
+            .iter()
+            .flat_map(|line| {
+                line.items.iter().filter_map(|item| {
+                    (tree.get_flexbox_child_style(item.node).flex_visibility()
+                        == crate::style::FlexItemVisibility::Collapse)
+                        .then_some((item.node, line.cross_size))
+                })
+            })
+            .collect::<Vec<_>>();
+        if !struts.is_empty() {
+            return compute_preliminary(tree, node, inputs, Some(&struts));
+        }
+    }
 
     // 11. Determine the used cross size of each flex item.
     debug_log!("determine_used_cross_size");
@@ -462,6 +498,10 @@ fn compute_preliminary(tree: &mut impl LayoutFlexboxContainer, node: NodeId, inp
     let len = tree.child_count(node);
     for order in 0..len {
         let child = tree.get_child_id(node, order);
+        if collapse_struts.is_some_and(|struts| struts.iter().any(|&(node, _)| node == child)) {
+            tree.set_unrounded_layout(child, &Layout::with_order(order as u32));
+            continue;
+        }
         if tree.get_flexbox_child_style(child).box_generation_mode() == BoxGenerationMode::None {
             tree.set_unrounded_layout(child, &Layout::with_order(order as u32));
             tree.perform_child_layout(
@@ -629,6 +669,7 @@ fn generate_anonymous_flex_items(
             FlexItem {
                 node: child,
                 order: index as u32,
+                collapse_strut: None,
                 size: preferred_size
                     .maybe_apply_aspect_ratio(aspect_ratio)
                     .with_cross(constants.dir, preferred_size.cross(constants.dir))
@@ -992,6 +1033,7 @@ fn collect_flex_lines<'a>(
     let mut lines = partition_flex_lines(constants, available_space, flex_items);
     let line_count = lines.len();
     for (line_index, line) in lines.iter_mut().enumerate() {
+        line.retain_visible_items();
         let item_count = line.items.len();
         for (item_index, item) in line.items.iter_mut().enumerate() {
             let trim = constants.item_margin_trim(
@@ -1074,7 +1116,7 @@ fn partition_flex_lines<'a>(
 ) -> Vec<FlexLine<'a>> {
     if !constants.is_wrap {
         let mut lines = new_vec_with_capacity(1);
-        lines.push(FlexLine { items: flex_items.as_mut_slice(), cross_size: 0.0, offset_cross: 0.0 });
+        lines.push(FlexLine::new(flex_items.as_mut_slice()));
         lines
     } else {
         let main_axis_available_space = match constants.max_size.main(constants.dir) {
@@ -1089,8 +1131,14 @@ fn partition_flex_lines<'a>(
         };
 
         if constants.is_balanced && main_axis_available_space != AvailableSpace::MinContent {
+            let visible_indices = flex_items
+                .iter()
+                .enumerate()
+                .filter_map(|(index, item)| item.collapse_strut.is_none().then_some(index))
+                .collect::<Vec<_>>();
             let sizes = flex_items
                 .iter()
+                .filter(|item| item.collapse_strut.is_none())
                 .map(|item| balance::BalancedItem {
                     outer_size: item.hypothetical_outer_size.main(constants.dir),
                     trimmed_margins: constants.trimmed_main_margins(item),
@@ -1102,12 +1150,19 @@ fn partition_flex_lines<'a>(
                 main_axis_available_space.into_option(),
                 constants.minimum_line_count,
             );
+            let ends = if visible_indices.is_empty() {
+                let mut ends = new_vec_with_capacity(1);
+                ends.push(flex_items.len());
+                ends
+            } else {
+                ends.into_iter().map(|end| visible_indices.get(end).copied().unwrap_or(flex_items.len())).collect()
+            };
             let mut lines = new_vec_with_capacity(ends.len());
             let mut remaining = flex_items.as_mut_slice();
             let mut start = 0;
             for end in ends {
                 let (items, rest) = remaining.split_at_mut(end - start);
-                lines.push(FlexLine { items, cross_size: 0.0, offset_cross: 0.0 });
+                lines.push(FlexLine::new(items));
                 remaining = rest;
                 start = end;
             }
@@ -1119,7 +1174,7 @@ fn partition_flex_lines<'a>(
             // (at least for now - future extensions to the CSS spec may add provisions for forced wrap points)
             AvailableSpace::MaxContent => {
                 let mut lines = new_vec_with_capacity(1);
-                lines.push(FlexLine { items: flex_items.as_mut_slice(), cross_size: 0.0, offset_cross: 0.0 });
+                lines.push(FlexLine::new(flex_items.as_mut_slice()));
                 lines
             }
             // If flex-wrap is Wrap and we're sizing under a min-content constraint, then we take every possible wrapping opportunity
@@ -1128,8 +1183,14 @@ fn partition_flex_lines<'a>(
                 let mut lines = new_vec_with_capacity(flex_items.len());
                 let mut items = &mut flex_items[..];
                 while !items.is_empty() {
-                    let (line_items, rest) = items.split_at_mut(1);
-                    lines.push(FlexLine { items: line_items, cross_size: 0.0, offset_cross: 0.0 });
+                    let end = items
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, item)| item.collapse_strut.is_none())
+                        .nth(1)
+                        .map_or(items.len(), |(index, _)| index);
+                    let (line_items, rest) = items.split_at_mut(end);
+                    lines.push(FlexLine::new(line_items));
                     items = rest;
                 }
                 lines
@@ -1142,23 +1203,31 @@ fn partition_flex_lines<'a>(
                 while !flex_items.is_empty() {
                     // Find index of the first item in the next line
                     // (or the last item if all remaining items are in the current line)
-                    let mut line_length = -constants.trimmed_main_margins(&flex_items[0]).start;
+                    let mut line_length = 0.0;
+                    let mut visible_count = 0;
                     let index = flex_items
                         .iter()
                         .enumerate()
                         .find(|&(idx, child)| {
+                            if child.collapse_strut.is_some() {
+                                return false;
+                            }
+                            if visible_count == 0 {
+                                line_length -= constants.trimmed_main_margins(child).start;
+                            }
                             // Gaps only occur between items (not before the first one or after the last one)
                             // So first item in the line does not contribute a gap to the line length
-                            let gap_contribution = if idx == 0 { 0.0 } else { main_axis_gap };
+                            let gap_contribution = if visible_count == 0 { 0.0 } else { main_axis_gap };
                             line_length += child.hypothetical_outer_size.main(constants.dir) + gap_contribution;
                             let trimmed_length = line_length - constants.trimmed_main_margins(child).end;
-                            trimmed_length > main_axis_available_space && idx != 0
+                            visible_count += 1;
+                            trimmed_length > main_axis_available_space && visible_count > 1 && idx != 0
                         })
                         .map(|(idx, _)| idx)
                         .unwrap_or(flex_items.len());
 
                     let (items, rest) = flex_items.split_at_mut(index);
-                    lines.push(FlexLine { items, cross_size: 0.0, offset_cross: 0.0 });
+                    lines.push(FlexLine::new(items));
                     flex_items = rest;
                 }
                 lines
@@ -1781,6 +1850,9 @@ fn calculate_cross_size(flex_lines: &mut [FlexLine], node_size: Size<Option<f32>
             );
         }
     }
+    for line in flex_lines {
+        line.cross_size = line.cross_size.max(line.strut_cross_size);
+    }
 }
 
 /// Handle 'align-content: stretch'.
@@ -1828,7 +1900,7 @@ fn handle_align_content_stretch(flex_lines: &mut [FlexLine], node_size: Size<Opt
 ///   **Note that this step does not affect the main size of the flex item, even if it has an intrinsic aspect ratio**.
 #[inline]
 fn determine_used_cross_size(
-    tree: &impl LayoutFlexboxContainer,
+    tree: &mut impl LayoutFlexboxContainer,
     flex_lines: &mut [FlexLine],
     constants: &AlgoConstants,
 ) {
@@ -1836,12 +1908,38 @@ fn determine_used_cross_size(
         let line_cross_size = line.cross_size;
 
         for child in line.items.iter_mut() {
+            let cross_sizing = tree.get_flexbox_child_style(child.node).flex_cross_size();
+            let line_fit_content = if cross_sizing == crate::style::FlexCrossSize::FitContent {
+                Some(
+                    tree.measure_child_size(
+                        child.node,
+                        Size::NONE.with_main(constants.dir, Some(child.target_size.main(constants.dir))),
+                        constants.node_inner_size,
+                        Size::MAX_CONTENT.with_cross(
+                            constants.dir,
+                            AvailableSpace::Definite(
+                                (line_cross_size - child.margin.cross_axis_sum(constants.dir)).max(0.0),
+                            ),
+                        ),
+                        SizingMode::ContentSize,
+                        constants.dir.cross_axis(),
+                        Line::FALSE,
+                    )
+                    .maybe_clamp(child.min_size.cross(constants.dir), child.max_size.cross(constants.dir))
+                    .max((child.padding + child.border).cross_axis_sum(constants.dir)),
+                )
+            } else {
+                None
+            };
             let child_style = tree.get_flexbox_child_style(child.node);
             child.target_size.set_cross(
                 constants.dir,
                 if child_style.flex_cross_size() == crate::style::FlexCrossSize::Stretch
                     || (child.align_self == AlignSelf::STRETCH
-                        && child_style.flex_cross_size() == crate::style::FlexCrossSize::Style
+                        && matches!(
+                            cross_sizing,
+                            crate::style::FlexCrossSize::Style | crate::style::FlexCrossSize::FitContent
+                        )
                         && !child.margin_is_auto.cross_start(constants.dir)
                         && !child.margin_is_auto.cross_end(constants.dir)
                         && child_style.size().cross(constants.dir).is_auto())
@@ -1872,7 +1970,7 @@ fn determine_used_cross_size(
                     (line_cross_size - child.margin.cross_axis_sum(constants.dir))
                         .maybe_clamp(child.min_size.cross(constants.dir), maximum)
                 } else {
-                    child.hypothetical_inner_size.cross(constants.dir)
+                    line_fit_content.unwrap_or(child.hypothetical_inner_size.cross(constants.dir))
                 },
             );
 

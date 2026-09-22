@@ -311,6 +311,12 @@ pub trait GridContainerStyle: CoreStyle {
 
 /// The set of styles required for a CSS Grid item (child of a CSS Grid container)
 pub trait GridItemStyle: CoreStyle {
+    /// Additional margins supplied by an embedding subgrid implementation.
+    /// These affect alignment and stretch while preserving the parent grid area
+    /// as the percentage basis and leaving authored/automatic margins distinct.
+    fn grid_subgrid_margin(&self) -> crate::geometry::Rect<f32> {
+        crate::geometry::Rect::ZERO
+    }
     /// Defines which row in the grid the item should start and end at
     #[inline(always)]
     fn grid_row(&self) -> Line<GridPlacement<Self::CustomIdent>> {

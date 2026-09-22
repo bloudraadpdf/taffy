@@ -59,6 +59,11 @@ pub trait FlexboxContainerStyle: CoreStyle {
 
 /// The set of styles required for a Flexbox item (child of a Flexbox container)
 pub trait FlexboxItemStyle: CoreStyle {
+    /// Whether the item leaves only its line's cross-size strut.
+    #[inline(always)]
+    fn flex_visibility(&self) -> FlexItemVisibility {
+        Style::<Self::CustomIdent>::DEFAULT.flex_visibility
+    }
     /// How the item's preferred cross size is determined.
     #[inline(always)]
     fn flex_cross_size(&self) -> FlexCrossSize {
@@ -95,6 +100,17 @@ pub trait FlexboxItemStyle: CoreStyle {
 
 use crate::geometry::AbsoluteAxis;
 
+/// Participation in flex line layout.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+pub enum FlexItemVisibility {
+    /// Retain the item's main and cross contributions.
+    #[default]
+    Visible,
+    /// Replace the item with its original line's cross-size strut.
+    Collapse,
+}
+
 /// Item contributions used to size an indefinite flex main axis.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
@@ -117,6 +133,8 @@ pub enum FlexCrossSize {
     Stretch,
     /// Use the content size measured with the final main size.
     Content,
+    /// Fit content into the available cross space, then recalculate against the line.
+    FitContent,
 }
 
 /// Cross bounds that depend on layout at the final main size.

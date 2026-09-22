@@ -173,10 +173,16 @@ pub(super) fn align_and_position_item(
     // Both physical margin axes resolve against the logical inline size of the grid area.
     let margin =
         style.margin().map(|margin| margin.resolve_to_option(item_inline_size, |val, basis| tree.calc(val, basis)));
+    let subgrid_margin = style.grid_subgrid_margin();
 
     let grid_area_minus_item_margins_size = Size {
-        width: grid_area_size.width.maybe_sub(margin.left).maybe_sub(margin.right),
-        height: grid_area_size.height.maybe_sub(margin.top).maybe_sub(margin.bottom) - baseline_shim,
+        width: grid_area_size.width.maybe_sub(margin.left).maybe_sub(margin.right)
+            - subgrid_margin.left
+            - subgrid_margin.right,
+        height: grid_area_size.height.maybe_sub(margin.top).maybe_sub(margin.bottom)
+            - subgrid_margin.top
+            - subgrid_margin.bottom
+            - baseline_shim,
     };
 
     // If node is absolutely positioned and width is not set explicitly, then deduce it
@@ -266,7 +272,7 @@ pub(super) fn align_and_position_item(
     let Size { width, height } = size.unwrap_or(layout_output.size).maybe_clamp(min_size, max_size);
 
     let (x, x_margin) = align_item_within_area(
-        Line { start: grid_area.left, end: grid_area.right },
+        Line { start: grid_area.left + subgrid_margin.left, end: grid_area.right - subgrid_margin.right },
         justify_self.unwrap_or(alignment_styles.horizontal),
         width,
         position,
@@ -276,7 +282,7 @@ pub(super) fn align_and_position_item(
         direction,
     );
     let (y, y_margin) = align_item_within_area(
-        Line { start: grid_area.top, end: grid_area.bottom },
+        Line { start: grid_area.top + subgrid_margin.top, end: grid_area.bottom - subgrid_margin.bottom },
         align_self.unwrap_or(alignment_styles.vertical),
         height,
         position,
@@ -414,4 +420,54 @@ pub(super) fn align_item_within_area(
     }
 
     (start, resolved_margin)
+}
+
+#[cfg(all(test, feature = "taffy_tree"))]
+mod subgrid_margin_tests {
+    use crate::geometry::Rect;
+    use crate::prelude::*;
+
+    #[test]
+    fn virtual_margins_preserve_percentage_bases_and_authored_auto_margins() {
+        for (virtual_start, virtual_end, width, margin, expected_x, expected_width, expected_margin) in [
+            (0.0, 100.0, auto(), Rect::zero(), 0.0, 0.0, 0.0),
+            (-25.0, 0.0, auto(), Rect::zero(), -25.0, 75.0, 0.0),
+            (10.0, 0.0, percent(0.5), Rect::zero(), 10.0, 25.0, 0.0),
+            (
+                10.0,
+                0.0,
+                length(20.0),
+                Rect { left: auto(), right: auto(), top: zero(), bottom: zero() },
+                20.0,
+                20.0,
+                10.0,
+            ),
+        ] {
+            let mut tree: TaffyTree = TaffyTree::new();
+            let child = tree
+                .new_leaf(Style {
+                    size: Size { width, height: length(10.0) },
+                    margin,
+                    grid_subgrid_margin: Rect { left: virtual_start, right: virtual_end, top: 0.0, bottom: 0.0 },
+                    ..Style::default()
+                })
+                .unwrap();
+            let root = tree
+                .new_with_children(
+                    Style {
+                        display: Display::Grid,
+                        size: Size { width: length(50.0), height: length(10.0) },
+                        grid_template_columns: vec![length(50.0)],
+                        ..Style::default()
+                    },
+                    &[child],
+                )
+                .unwrap();
+            tree.compute_layout(root, Size::MAX_CONTENT).unwrap();
+            let layout = tree.layout(child).unwrap();
+            assert_eq!(layout.location.x, expected_x);
+            assert_eq!(layout.size.width, expected_width);
+            assert_eq!(layout.margin.left, expected_margin);
+        }
+    }
 }

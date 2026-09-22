@@ -320,10 +320,12 @@ fn build_style<S: CheapCloneStr>(xnode: roxmltree::Node) -> taffy::Style<S> {
         flex_line_count: core::num::NonZeroU32::MIN,
         flex_grow: parse_or(xnode.attribute("flex-grow"), 0.0),
         flex_shrink: parse_or(xnode.attribute("flex-shrink"), 1.0),
+        flex_visibility: Default::default(),
         flex_basis: parse_or(xnode.attribute("flex-basis"), Dimension::auto()),
 
         grid_auto_flow: parse_or_default(xnode.attribute("grid-auto-flow")),
         grid_item_inline_axis: Default::default(),
+        grid_subgrid_margin: Default::default(),
 
         grid_template_rows: grid_template_rows.tracks,
         grid_template_row_names: grid_template_rows.line_names,

@@ -26,8 +26,8 @@ use crate::sys::DefaultCheapStr;
 pub use self::block::{BlockContainerStyle, BlockItemStyle, TextAlign};
 #[cfg(feature = "flexbox")]
 pub use self::flex::{
-    FlexCrossIntrinsicBounds, FlexCrossSize, FlexDirection, FlexMainSizing, FlexWrap, FlexboxContainerStyle,
-    FlexboxItemStyle,
+    FlexCrossIntrinsicBounds, FlexCrossSize, FlexDirection, FlexItemVisibility, FlexMainSizing, FlexWrap,
+    FlexboxContainerStyle, FlexboxItemStyle,
 };
 #[cfg(feature = "float_layout")]
 pub use self::float::{Clear, Float, FloatDirection};
@@ -557,6 +557,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     pub margin_trim: Rect<bool>,
 
     // Flexbox item properties
+    /// Participation in flex line layout.
+    #[cfg(feature = "flexbox")]
+    pub flex_visibility: FlexItemVisibility,
     /// How the item's preferred cross size is determined.
     #[cfg(feature = "flexbox")]
     pub flex_cross_size: FlexCrossSize,
@@ -598,6 +601,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     /// Physical axis that carries each grid area's logical inline size
     #[cfg(feature = "grid")]
     pub grid_item_inline_axis: GridItemInlineAxis,
+    /// Virtual margins contributed by the edges of a subgrid.
+    #[cfg(feature = "grid")]
+    pub grid_subgrid_margin: Rect<f32>,
 
     // Grid container named properties
     /// Defines the rectangular grid areas
@@ -663,6 +669,8 @@ impl<S: CheapCloneStr> Style<S> {
         text_align: TextAlign::Auto,
         // Flexbox
         #[cfg(feature = "flexbox")]
+        flex_visibility: FlexItemVisibility::Visible,
+        #[cfg(feature = "flexbox")]
         flex_direction: FlexDirection::Row,
         #[cfg(feature = "flexbox")]
         flex_main_sizing: FlexMainSizing::IntrinsicContributions,
@@ -702,6 +710,8 @@ impl<S: CheapCloneStr> Style<S> {
         grid_auto_flow: GridAutoFlow::Row,
         #[cfg(feature = "grid")]
         grid_item_inline_axis: GridItemInlineAxis::Horizontal,
+        #[cfg(feature = "grid")]
+        grid_subgrid_margin: Rect::ZERO,
         #[cfg(feature = "grid")]
         grid_row: Line { start: GridPlacement::<S>::Auto, end: GridPlacement::<S>::Auto },
         #[cfg(feature = "grid")]
@@ -1006,6 +1016,10 @@ impl<T: FlexboxContainerStyle> FlexboxContainerStyle for &'_ T {
 #[cfg(feature = "flexbox")]
 impl<S: CheapCloneStr> FlexboxItemStyle for Style<S> {
     #[inline(always)]
+    fn flex_visibility(&self) -> FlexItemVisibility {
+        self.flex_visibility
+    }
+    #[inline(always)]
     fn flex_cross_size(&self) -> FlexCrossSize {
         self.flex_cross_size
     }
@@ -1033,6 +1047,10 @@ impl<S: CheapCloneStr> FlexboxItemStyle for Style<S> {
 
 #[cfg(feature = "flexbox")]
 impl<T: FlexboxItemStyle> FlexboxItemStyle for &'_ T {
+    #[inline(always)]
+    fn flex_visibility(&self) -> FlexItemVisibility {
+        (*self).flex_visibility()
+    }
     #[inline(always)]
     fn flex_cross_size(&self) -> FlexCrossSize {
         (*self).flex_cross_size()
@@ -1273,6 +1291,10 @@ impl<T: GridContainerStyle> GridContainerStyle for &'_ T {
 #[cfg(feature = "grid")]
 impl<S: CheapCloneStr> GridItemStyle for Style<S> {
     #[inline(always)]
+    fn grid_subgrid_margin(&self) -> Rect<f32> {
+        self.grid_subgrid_margin
+    }
+    #[inline(always)]
     fn grid_row(&self) -> Line<GridPlacement<S>> {
         // TODO: Investigate eliminating clone
         self.grid_row.clone()
@@ -1294,6 +1316,10 @@ impl<S: CheapCloneStr> GridItemStyle for Style<S> {
 
 #[cfg(feature = "grid")]
 impl<T: GridItemStyle> GridItemStyle for &'_ T {
+    #[inline(always)]
+    fn grid_subgrid_margin(&self) -> Rect<f32> {
+        (*self).grid_subgrid_margin()
+    }
     #[inline(always)]
     fn grid_row(&self) -> Line<GridPlacement<Self::CustomIdent>> {
         (*self).grid_row()
@@ -1371,6 +1397,8 @@ mod tests {
             #[cfg(feature = "flexbox")]
             flex_grow: 0.0,
             #[cfg(feature = "flexbox")]
+            flex_visibility: super::FlexItemVisibility::Visible,
+            #[cfg(feature = "flexbox")]
             flex_shrink: 1.0,
             #[cfg(feature = "flexbox")]
             flex_basis: super::Dimension::AUTO,
@@ -1401,6 +1429,8 @@ mod tests {
             grid_auto_flow: Default::default(),
             #[cfg(feature = "grid")]
             grid_item_inline_axis: Default::default(),
+            #[cfg(feature = "grid")]
+            grid_subgrid_margin: Rect::ZERO,
             #[cfg(feature = "grid")]
             grid_row: Line { start: GridPlacement::Auto, end: GridPlacement::Auto },
             #[cfg(feature = "grid")]
@@ -1485,12 +1515,12 @@ mod tests {
         assert_type_size::<GridTemplateComponent<String>>(56);
         assert_type_size::<GridPlacement<String>>(32);
         assert_type_size::<Line<GridPlacement<String>>>(64);
-        assert_type_size::<Style<String>>(624);
+        assert_type_size::<Style<String>>(640);
 
         // String-type dependent (Arc<str>)
         assert_type_size::<GridTemplateComponent<Arc<str>>>(56);
         assert_type_size::<GridPlacement<Arc<str>>>(24);
         assert_type_size::<Line<GridPlacement<Arc<str>>>>(48);
-        assert_type_size::<Style<Arc<str>>>(592);
+        assert_type_size::<Style<Arc<str>>>(608);
     }
 }
