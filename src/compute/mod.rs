@@ -293,7 +293,7 @@ pub fn compute_hidden_layout(tree: &mut (impl LayoutPartialTree + CacheTree), no
 #[cfg(feature = "detailed_layout_info")]
 pub mod detailed_info {
     #[cfg(feature = "flexbox")]
-    pub use super::flexbox::DetailedFlexInfo;
+    pub use super::flexbox::{DetailedFlexInfo, DetailedFlexItemInfo, FlexItemEdgeAnchor};
     #[cfg(feature = "grid")]
     pub use super::grid::{DetailedGridInfo, DetailedGridItemsInfo, DetailedGridTracksInfo};
 }
