@@ -10,6 +10,7 @@ fn fit_content_cross_size_uses_the_final_line_without_changing_the_main_size() {
     let item = tree
         .new_leaf(Style {
             size: Size { width: auto(), height: length(200.0) },
+            margin: taffy::geometry::Rect { left: length(5.0), right: length(5.0), top: zero(), bottom: zero() },
             flex_cross_size: taffy::FlexCrossSize::FitContent,
             align_self: Some(AlignSelf::FLEX_START),
             ..Style::default()
@@ -37,7 +38,24 @@ fn fit_content_cross_size_uses_the_final_line_without_changing_the_main_size() {
         height: known.height.unwrap_or(200.0),
     })
     .unwrap();
-    assert_eq!(tree.layout(item).unwrap().size, Size { width: 200.0, height: 200.0 });
+    assert_eq!(tree.layout(item).unwrap().size, Size { width: 190.0, height: 200.0 });
+}
+
+#[test]
+fn embedding_baseline_strut_overrides_size_only_measurement() {
+    let mut tree: TaffyTree<()> = TaffyTree::new();
+    let child = tree
+        .new_leaf(Style {
+            size: Size { width: length(20.0), height: length(40.0) },
+            flex_visibility: FlexItemVisibility::CollapseWithStrut(60.0),
+            ..Style::default()
+        })
+        .unwrap();
+    let visible =
+        tree.new_leaf(Style { size: Size { width: length(20.0), height: length(20.0) }, ..Style::default() }).unwrap();
+    let root = tree.new_with_children(Style::default(), &[child, visible]).unwrap();
+    tree.compute_layout(root, Size::MAX_CONTENT).unwrap();
+    assert_eq!(tree.layout(root).unwrap().size, Size { width: 20.0, height: 60.0 });
 }
 
 #[test]

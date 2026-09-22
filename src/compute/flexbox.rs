@@ -436,10 +436,10 @@ fn compute_preliminary(
         let struts = flex_lines
             .iter()
             .flat_map(|line| {
-                line.items.iter().filter_map(|item| {
-                    (tree.get_flexbox_child_style(item.node).flex_visibility()
-                        == crate::style::FlexItemVisibility::Collapse)
-                        .then_some((item.node, line.cross_size))
+                line.items.iter().filter_map(|item| match tree.get_flexbox_child_style(item.node).flex_visibility() {
+                    crate::style::FlexItemVisibility::Visible => None,
+                    crate::style::FlexItemVisibility::Collapse => Some((item.node, line.cross_size)),
+                    crate::style::FlexItemVisibility::CollapseWithStrut(cross) => Some((item.node, cross)),
                 })
             })
             .collect::<Vec<_>>();
@@ -1915,12 +1915,7 @@ fn determine_used_cross_size(
                         child.node,
                         Size::NONE.with_main(constants.dir, Some(child.target_size.main(constants.dir))),
                         constants.node_inner_size,
-                        Size::MAX_CONTENT.with_cross(
-                            constants.dir,
-                            AvailableSpace::Definite(
-                                (line_cross_size - child.margin.cross_axis_sum(constants.dir)).max(0.0),
-                            ),
-                        ),
+                        Size::MAX_CONTENT.with_cross(constants.dir, AvailableSpace::Definite(line_cross_size)),
                         SizingMode::ContentSize,
                         constants.dir.cross_axis(),
                         Line::FALSE,

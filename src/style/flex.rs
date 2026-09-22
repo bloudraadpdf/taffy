@@ -101,7 +101,7 @@ pub trait FlexboxItemStyle: CoreStyle {
 use crate::geometry::AbsoluteAxis;
 
 /// Participation in flex line layout.
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+#[derive(Copy, Clone, PartialEq, Debug, Default)]
 #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum FlexItemVisibility {
     /// Retain the item's main and cross contributions.
@@ -109,6 +109,8 @@ pub enum FlexItemVisibility {
     Visible,
     /// Replace the item with its original line's cross-size strut.
     Collapse,
+    /// Use a line strut measured with the embedding engine's text baselines.
+    CollapseWithStrut(f32),
 }
 
 /// Item contributions used to size an indefinite flex main axis.
