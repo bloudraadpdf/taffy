@@ -134,6 +134,25 @@ fn collapsed_struts_move_with_zero_main_size_and_keep_original_line_height() {
     tree.compute_layout(root, Size::MAX_CONTENT).unwrap();
     assert_eq!(tree.layout(tall).unwrap().location.y, 40.0);
     assert_eq!(tree.layout(root).unwrap().size.height, 80.0);
+    #[cfg(feature = "detailed_layout_info")]
+    {
+        let taffy::tree::DetailedLayoutInfo::Flex(info) = tree.detailed_layout_info(root) else {
+            panic!("flex metadata");
+        };
+        assert_eq!(info.collapse_struts, vec![(collapsed, 40.0)]);
+        let strut = info.collapse_struts[0].1;
+        let mut root_style = tree.style(root).unwrap().clone();
+        root_style.size.height = length(80.0);
+        root_style.min_size.height = length(80.0);
+        root_style.max_size.height = length(80.0);
+        tree.set_style(root, root_style).unwrap();
+        let mut collapsed_style = tree.style(collapsed).unwrap().clone();
+        collapsed_style.flex_visibility = FlexItemVisibility::CollapseWithStrut(strut);
+        tree.set_style(collapsed, collapsed_style).unwrap();
+        tree.compute_layout(root, Size::MAX_CONTENT).unwrap();
+        assert_eq!(tree.layout(tall).unwrap().location.y, 40.0);
+        assert_eq!(tree.layout(root).unwrap().size.height, 80.0);
+    }
 }
 
 #[test]

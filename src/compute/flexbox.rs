@@ -28,6 +28,8 @@ pub use balance::balanced_flex_line_ends;
 pub struct DetailedFlexInfo {
     /// Item IDs on each line, in order-modified document order.
     pub lines: Vec<Vec<NodeId>>,
+    /// Original cross-axis struts, retained for embedding used-value reruns.
+    pub collapse_struts: Vec<(NodeId, f32)>,
 }
 
 /// The intermediate results of a flexbox calculation for a single item
@@ -487,6 +489,7 @@ fn compute_preliminary(
         node,
         DetailedFlexInfo {
             lines: flex_lines.iter().map(|line| line.items.iter().map(|item| item.node).collect()).collect(),
+            collapse_struts: collapse_struts.unwrap_or_default().to_vec(),
         },
     );
 
