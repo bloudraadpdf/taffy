@@ -12,6 +12,55 @@ fn anchors(tree: &TaffyTree<()>, root: NodeId, item: NodeId) -> Size<Option<Flex
 }
 
 #[test]
+fn stretched_border_overflows_zero_cross_size_from_start() {
+    for column in [false, true] {
+        let mut tree: TaffyTree<()> = TaffyTree::new();
+        tree.disable_rounding();
+        let item = tree
+            .new_leaf(Style {
+                size: if column {
+                    Size { width: auto(), height: length(100.0) }
+                } else {
+                    Size { width: length(100.0), height: auto() }
+                },
+                border: if column {
+                    Rect { left: length(5.0), ..Rect::zero() }
+                } else {
+                    Rect { bottom: length(5.0), ..Rect::zero() }
+                },
+                ..Style::default()
+            })
+            .unwrap();
+        let root = tree
+            .new_with_children(
+                Style {
+                    flex_direction: if column { FlexDirection::Column } else { FlexDirection::Row },
+                    size: if column {
+                        Size { width: length(0.0), height: auto() }
+                    } else {
+                        Size { width: auto(), height: length(0.0) }
+                    },
+                    ..Style::default()
+                },
+                &[item],
+            )
+            .unwrap();
+        tree.compute_layout(root, Size::MAX_CONTENT).unwrap();
+        let child = tree.unrounded_layout(item);
+        let edge = anchors(&tree, root, item);
+        if column {
+            assert_eq!(edge.width, Some(FlexItemEdgeAnchor::Start(0.0)));
+            assert_eq!(child.location.x, 0.0);
+            assert_eq!(child.size.width, 5.0);
+        } else {
+            assert_eq!(edge.height, Some(FlexItemEdgeAnchor::Start(0.0)));
+            assert_eq!(child.location.y, 0.0);
+            assert_eq!(child.size.height, 5.0);
+        }
+    }
+}
+
+#[test]
 fn fractional_flex_budgets_retain_the_terminal_parent_edge() {
     for mechanism in ["grow", "margins", "justify", "lines", "stretch"] {
         for step in 0..10 {

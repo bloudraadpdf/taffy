@@ -2029,7 +2029,9 @@ fn determine_used_cross_size(
                         max_size_ignoring_aspect_ratio.cross(constants.dir)
                     };
                     let available = line_cross_size - child.margin.cross_axis_sum(constants.dir);
-                    let clamped = available.maybe_clamp(child.min_size.cross(constants.dir), maximum);
+                    let clamped = available
+                        .maybe_clamp(child.min_size.cross(constants.dir), maximum)
+                        .max(pb_sum.cross(constants.dir));
                     child.cross_fills_line = clamped == available;
                     clamped
                 } else {
