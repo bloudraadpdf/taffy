@@ -9,6 +9,7 @@ use crate::style_helpers::{
 /// here we can reduce MSRV from 1.84 all the way down to 1.65 while retaining const constructors and
 /// strict pointer provenance
 mod compat {
+    #![cfg_attr(feature = "strict_provenance", clippy::msrv = "1.84.0")]
     #![allow(unsafe_code)]
     #![allow(unknown_lints)]
     #![allow(unnecessary_transmutes)]
