@@ -621,7 +621,6 @@ impl GridItem {
         if self
             .size
             .maybe_resolve(preferred_size_basis, |val, basis| tree.calc(val, basis))
-            .maybe_apply_aspect_ratio(self.aspect_ratio)
             .maybe_add(box_sizing_adjustment)
             .get(axis)
             .is_some()
