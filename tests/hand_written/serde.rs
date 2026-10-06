@@ -1,6 +1,6 @@
 #[cfg(test)]
 #[cfg(feature = "serde")]
-mod serde {
+mod tests {
     use serde_json::{self, Value};
     use taffy::style::Style;
 
@@ -49,6 +49,6 @@ mod serde {
             "grid_row": { "start": "Auto" },
             "grid_column": { "end": "Auto" }
         }"###;
-        let _: Value = serde_json::from_str(&json).unwrap();
+        let _: Value = serde_json::from_str(json).unwrap();
     }
 }
