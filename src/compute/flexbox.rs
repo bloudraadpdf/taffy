@@ -131,13 +131,41 @@ impl FlexItem {
         preferred_size: Size<Option<f32>>,
         box_sizing_adjustment: Size<f32>,
     ) -> (Size<Option<f32>>, Size<Option<f32>>) {
-        let transfer = |size: Size<Option<f32>>| {
-            size.maybe_sub(box_sizing_adjustment)
-                .maybe_apply_aspect_ratio(self.aspect_ratio)
-                .maybe_add(box_sizing_adjustment)
-        };
-        let minimum = self.min_size.or(transfer(self.min_size).maybe_min(preferred_size).maybe_min(self.max_size));
-        let maximum = self.max_size.or(transfer(self.max_size).maybe_max(preferred_size).maybe_max(minimum));
+        let minimum = self.min_size.or(self
+            .transfer_size(self.min_size, box_sizing_adjustment)
+            .maybe_min(preferred_size)
+            .maybe_min(self.max_size));
+        let maximum = self
+            .max_size
+            .or(self.transfer_size(self.max_size, box_sizing_adjustment).maybe_max(preferred_size).maybe_max(minimum));
+        (minimum, maximum)
+    }
+
+    /// Transfer a size through the aspect ratio in its reference box.
+    fn transfer_size(&self, size: Size<Option<f32>>, box_sizing_adjustment: Size<f32>) -> Size<Option<f32>> {
+        size.maybe_sub(box_sizing_adjustment)
+            .maybe_apply_aspect_ratio(self.aspect_ratio)
+            .maybe_add(box_sizing_adjustment)
+    }
+
+    /// Resolve preferred main-size bounds from cross-axis constraints.
+    fn transferred_preferred_main_limits(
+        &self,
+        direction: FlexDirection,
+        preferred_size: Size<Option<f32>>,
+        box_sizing_adjustment: Size<f32>,
+    ) -> (Option<f32>, Option<f32>) {
+        let minimum = self
+            .transfer_size(self.min_size.with_main(direction, None), box_sizing_adjustment)
+            .main(direction)
+            .maybe_min(preferred_size.main(direction))
+            .maybe_min(self.max_size.main(direction));
+        let maximum = self
+            .transfer_size(self.max_size.with_main(direction, None), box_sizing_adjustment)
+            .main(direction)
+            .maybe_max(preferred_size.main(direction))
+            .maybe_max(self.min_size.main(direction))
+            .maybe_max(minimum);
         (minimum, maximum)
     }
 
@@ -876,6 +904,8 @@ fn determine_flex_base_size(
         let cross_axis_margin_sum = constants.margin.cross_axis_sum(dir);
         let (transferred_min_size, transferred_max_size) =
             child.transferred_size_limits(preferred_size, box_sizing_adjustment);
+        let (preferred_min_main, preferred_max_main) =
+            child.transferred_preferred_main_limits(dir, preferred_size, box_sizing_adjustment);
         let child_min_cross = transferred_min_size.cross(dir).maybe_add(cross_axis_margin_sum);
         let child_max_cross = transferred_max_size.cross(dir).maybe_add(cross_axis_margin_sum);
 
@@ -977,15 +1007,17 @@ fn determine_flex_base_size(
                 .with_cross(dir, cross_axis_available_space);
 
             debug_log!("COMPUTE CHILD BASE SIZE:");
-            break 'flex_basis tree.measure_child_size(
-                child.node,
-                child_known_dimensions,
-                child_parent_size,
-                child_available_space,
-                SizingMode::ContentSize,
-                dir.main_axis(),
-                Line::FALSE,
-            );
+            break 'flex_basis tree
+                .measure_child_size(
+                    child.node,
+                    child_known_dimensions,
+                    child_parent_size,
+                    child_available_space,
+                    SizingMode::ContentSize,
+                    dir.main_axis(),
+                    Line::FALSE,
+                )
+                .maybe_clamp(preferred_min_main, preferred_max_main);
         };
 
         // Floor flex-basis by the padding_border_sum (floors inner_flex_basis at zero)
@@ -1033,8 +1065,10 @@ fn determine_flex_base_size(
 
             // 4.5. Automatic Minimum Size of Flex Items
             // https://www.w3.org/TR/css-flexbox-1/#min-size-auto
-            let clamped_min_content_size =
-                min_content_main_size.maybe_min(child.size.main(dir)).maybe_min(transferred_max_size.main(dir));
+            let clamped_min_content_size = min_content_main_size
+                .maybe_max(preferred_min_main)
+                .maybe_min(child.size.main(dir))
+                .maybe_min(transferred_max_size.main(dir));
             clamped_min_content_size.maybe_max(padding_border_axes_sums.main(dir))
         });
 
