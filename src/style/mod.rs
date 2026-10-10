@@ -564,6 +564,7 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     #[cfg(feature = "flexbox")]
     pub flex_cross_size: FlexCrossSize,
     /// Intrinsic cross bounds measured with the final main size.
+    #[cfg(feature = "flexbox")]
     pub flex_cross_intrinsic_bounds: FlexCrossIntrinsicBounds,
     /// Sets the initial main axis size of the item
     #[cfg(feature = "flexbox")]
@@ -688,6 +689,7 @@ impl<S: CheapCloneStr> Style<S> {
         flex_basis: Dimension::AUTO,
         #[cfg(feature = "flexbox")]
         flex_cross_size: FlexCrossSize::Style,
+        #[cfg(feature = "flexbox")]
         flex_cross_intrinsic_bounds: FlexCrossIntrinsicBounds::None,
         // Grid
         #[cfg(feature = "grid")]
@@ -1404,6 +1406,7 @@ mod tests {
             flex_basis: super::Dimension::AUTO,
             #[cfg(feature = "flexbox")]
             flex_cross_size: super::FlexCrossSize::Style,
+            #[cfg(feature = "flexbox")]
             flex_cross_intrinsic_bounds: super::FlexCrossIntrinsicBounds::None,
             size: Size::auto(),
             min_size: Size::auto(),
