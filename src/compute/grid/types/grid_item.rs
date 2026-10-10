@@ -1,5 +1,6 @@
 //! Contains GridItem used to represent a single grid item during layout
 use super::GridTrack;
+use crate::compute::grid::util::{sum_f64, sum_f64_option};
 use crate::compute::grid::OriginZeroLine;
 use crate::geometry::{AbsoluteAxis, AbstractAxis};
 use crate::geometry::{Line, Point, Rect, Size};
@@ -248,12 +249,9 @@ impl GridItem {
             track.max_track_sizing_function.definite_limit(axis_parent_size, resolve_calc_value).is_some()
         });
         if tracks_all_fixed {
-            let limit: f32 = spanned_tracks
-                .iter()
-                .map(|track| {
-                    track.max_track_sizing_function.definite_limit(axis_parent_size, resolve_calc_value).unwrap()
-                })
-                .sum();
+            let limit = sum_f64(spanned_tracks.iter().map(|track| {
+                track.max_track_sizing_function.definite_limit(axis_parent_size, resolve_calc_value).unwrap()
+            }));
             Some(limit)
         } else {
             None
@@ -274,12 +272,9 @@ impl GridItem {
             track.max_track_sizing_function.definite_value(axis_parent_size, resolve_calc_value).is_some()
         });
         if tracks_all_fixed {
-            let limit: f32 = spanned_tracks
-                .iter()
-                .map(|track| {
-                    track.max_track_sizing_function.definite_value(axis_parent_size, resolve_calc_value).unwrap()
-                })
-                .sum();
+            let limit = sum_f64(spanned_tracks.iter().map(|track| {
+                track.max_track_sizing_function.definite_value(axis_parent_size, resolve_calc_value).unwrap()
+            }));
             Some(limit)
         } else {
             None
@@ -397,34 +392,26 @@ impl GridItem {
         let mut size = Size::NONE;
         size.set(
             axis,
-            axis_tracks[self.track_range_excluding_lines(axis)]
-                .iter()
-                .map(|track| {
-                    let min_size = track
-                        .min_track_sizing_function
-                        .definite_value(available_space.get(axis), resolve_calc_value)?;
-                    let max_size = track
-                        .max_track_sizing_function
-                        .definite_value(available_space.get(axis), resolve_calc_value)?;
+            sum_f64_option(axis_tracks[self.track_range_excluding_lines(axis)].iter().map(|track| {
+                let min_size =
+                    track.min_track_sizing_function.definite_value(available_space.get(axis), resolve_calc_value)?;
+                let max_size =
+                    track.max_track_sizing_function.definite_value(available_space.get(axis), resolve_calc_value)?;
 
-                    if min_size == max_size {
-                        Some(track.base_size)
-                    } else {
-                        None
-                    }
-                })
-                .sum::<Option<f32>>(),
+                if min_size == max_size {
+                    Some(track.base_size)
+                } else {
+                    None
+                }
+            })),
         );
 
         size.set(
             axis.other(),
-            other_axis_tracks[self.track_range_excluding_lines(axis.other())]
-                .iter()
-                .map(|track| {
-                    get_track_size_estimate(track, available_space.get(axis.other()))
-                        .map(|size| size + track.content_alignment_adjustment)
-                })
-                .sum::<Option<f32>>(),
+            sum_f64_option(other_axis_tracks[self.track_range_excluding_lines(axis.other())].iter().map(|track| {
+                get_track_size_estimate(track, available_space.get(axis.other()))
+                    .map(|size| size + track.content_alignment_adjustment)
+            })),
         );
 
         size

@@ -20,6 +20,7 @@ use track_sizing::{
     determine_if_item_crosses_flexible_or_intrinsic_tracks, resolve_item_track_indexes, track_sizing_algorithm,
 };
 use types::{CellOccupancyMatrix, GridTrack, IntrinsicContribution, NamedLineResolver, TrackCounts};
+use util::sum_f64;
 
 #[cfg(feature = "detailed_layout_info")]
 use types::{GridItem, GridTrackKind};
@@ -334,7 +335,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         },
         has_baseline_aligned_item,
     );
-    let initial_column_sum = columns.iter().map(|track| track.base_size).sum::<f32>();
+    let initial_column_sum = sum_f64(columns.iter().map(|track| track.base_size));
     inner_node_size.width = inner_node_size.width.or_else(|| initial_column_sum.into());
 
     items.iter_mut().for_each(|item| item.grid_area_size_cache = None);
@@ -356,7 +357,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         |track: &GridTrack, _, _| Some(track.base_size),
         false, // TODO: Support baseline alignment in the vertical axis
     );
-    let initial_row_sum = rows.iter().map(|track| track.base_size).sum::<f32>();
+    let initial_row_sum = sum_f64(rows.iter().map(|track| track.base_size));
     inner_node_size.height = inner_node_size.height.or_else(|| initial_row_sum.into());
 
     debug_log!("initial_column_sum", dbg:initial_column_sum);
@@ -558,8 +559,8 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
     if (intrinsic_column_contribution_changed && !has_percentage_column)
         || (intrinsic_row_contribution_changed && !has_percentage_row)
     {
-        let final_column_sum = columns.iter().map(|track| track.base_size).sum::<f32>();
-        let final_row_sum = rows.iter().map(|track| track.base_size).sum::<f32>();
+        let final_column_sum = sum_f64(columns.iter().map(|track| track.base_size));
+        let final_row_sum = sum_f64(rows.iter().map(|track| track.base_size));
 
         if intrinsic_column_contribution_changed && !has_percentage_column {
             container_border_box.width = resolved_style_size

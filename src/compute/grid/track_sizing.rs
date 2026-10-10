@@ -1,6 +1,7 @@
 //! Implements the track sizing algorithm
 //! <https://www.w3.org/TR/css-grid-1/#layout-algorithm>
 use super::types::{GridItem, GridTrack, TrackCounts};
+use super::util::{sum_f64, sum_f64_option};
 use crate::geometry::{AbsoluteAxis, AbstractAxis, Line, Size};
 use crate::style::{AlignContent, AlignContentKeyword, AlignSelf, AvailableSpace};
 use crate::tree::{LayoutInput, LayoutPartialTree, LayoutPartialTreeExt, RequestedAxis, RunMode, SizingMode};
@@ -241,12 +242,10 @@ pub(super) fn compute_alignment_gutter_adjustment(
     }
 
     if let Some(axis_inner_node_size) = axis_inner_node_size {
-        let free_space = tracks
-            .iter()
-            .map(|track| get_track_size_estimate(track, Some(axis_inner_node_size)))
-            .sum::<Option<f32>>()
-            .map(|track_size_sum| f32_max(0.0, axis_inner_node_size - track_size_sum))
-            .unwrap_or(0.0);
+        let free_space =
+            sum_f64_option(tracks.iter().map(|track| get_track_size_estimate(track, Some(axis_inner_node_size))))
+                .map(|track_size_sum| f32_max(0.0, axis_inner_node_size - track_size_sum))
+                .unwrap_or(0.0);
 
         let weighted_track_count =
             (((tracks.len() - 3) / 2) * inner_gutter_weight as usize) + (2 * outer_gutter_weight as usize);
@@ -1068,7 +1067,7 @@ fn distribute_item_space_to_base_size(
         let get_base_size = |track: &GridTrack| track.base_size;
 
         // 1. Find the space to distribute
-        let track_sizes: f32 = tracks.iter().map(|track| track.base_size).sum();
+        let track_sizes = sum_f64(tracks.iter().map(|track| track.base_size));
         let extra_space: f32 = f32_max(0.0, space - track_sizes);
 
         // 2. Distribute space up to limits:
@@ -1154,10 +1153,13 @@ fn distribute_item_space_to_growth_limit(
     }
 
     // 1. Find the space to distribute
-    let track_sizes: f32 = tracks
-        .iter()
-        .map(|track| if track.growth_limit == f32::INFINITY { track.base_size } else { track.growth_limit })
-        .sum();
+    let track_sizes = sum_f64(tracks.iter().map(|track| {
+        if track.growth_limit == f32::INFINITY {
+            track.base_size
+        } else {
+            track.growth_limit
+        }
+    }));
     let extra_space: f32 = f32_max(0.0, space - track_sizes);
 
     // 2. Distribute space up to limits:
@@ -1212,7 +1214,7 @@ fn maximise_tracks(
     axis_inner_node_size: Option<f32>,
     axis_available_grid_space: AvailableSpace,
 ) {
-    let used_space: f32 = axis_tracks.iter().map(|track| track.base_size).sum();
+    let used_space = sum_f64(axis_tracks.iter().map(|track| track.base_size));
     let free_space = axis_available_grid_space.compute_free_space(used_space);
     if free_space == f32::INFINITY {
         axis_tracks.iter_mut().for_each(|track| track.base_size = track.growth_limit);
@@ -1257,7 +1259,7 @@ fn expand_flexible_tracks<Tree: LayoutPartialTree>(
         //   The used flex fraction is the result of finding the size of an fr using all of the grid tracks and
         //   a space to fill of the available grid space.
         AvailableSpace::Definite(available_space) => {
-            let used_space: f32 = axis_tracks.iter().map(|track| track.base_size).sum();
+            let used_space = sum_f64(axis_tracks.iter().map(|track| track.base_size));
             let free_space = available_space - used_space;
             if free_space <= 0.0 {
                 0.0
@@ -1319,17 +1321,14 @@ fn expand_flexible_tracks<Tree: LayoutPartialTree>(
             // grid container’s max-width/height), then redo this step, treating the free space as definite and the available grid space as equal
             // to the grid container’s inner size when it’s sized to its min-width/height (max-width/height).
             // (Note: min_size takes precedence over max_size)
-            let hypothetical_grid_size: f32 = axis_tracks
-                .iter()
-                .map(|track| {
-                    if track.max_track_sizing_function.is_fr() {
-                        let track_flex_factor = track.max_track_sizing_function.0.value();
-                        f32_max(track.base_size, track_flex_factor * flex_fraction)
-                    } else {
-                        track.base_size
-                    }
-                })
-                .sum();
+            let hypothetical_grid_size = sum_f64(axis_tracks.iter().map(|track| {
+                if track.max_track_sizing_function.is_fr() {
+                    let track_flex_factor = track.max_track_sizing_function.0.value();
+                    f32_max(track.base_size, track_flex_factor * flex_fraction)
+                } else {
+                    track.base_size
+                }
+            }));
             let axis_min_size = axis_min_size.unwrap_or(0.0);
             let axis_max_size = axis_max_size.unwrap_or(f32::INFINITY);
             if hypothetical_grid_size < axis_min_size {
@@ -1421,7 +1420,7 @@ fn stretch_auto_tracks(
 ) {
     let num_auto_tracks = axis_tracks.iter().filter(|track| track.max_track_sizing_function.is_auto()).count();
     if num_auto_tracks > 0 {
-        let used_space: f32 = axis_tracks.iter().map(|track| track.base_size).sum();
+        let used_space = sum_f64(axis_tracks.iter().map(|track| track.base_size));
 
         // If the free space is indefinite, but the grid container has a definite min-width/height
         // use that size to calculate the free space for this step instead.
@@ -1458,8 +1457,10 @@ fn distribute_space_up_to_limits(
     /// extra space when it gets to exactly zero, we will stop when it falls below this amount
     const THRESHOLD: f32 = 0.01;
 
-    let mut space_to_distribute = space_to_distribute;
-    while space_to_distribute > THRESHOLD {
+    let mut space_to_distribute = f64::from(space_to_distribute);
+    let mut last_increased_track = None;
+    // The threshold stops the repeat passes, which only spread rounding residuals; a smaller space still gets a pass
+    while space_to_distribute > f64::from(THRESHOLD) || (last_increased_track.is_none() && space_to_distribute > 0.0) {
         let track_distribution_proportion_sum: f32 = tracks
             .iter()
             .filter(|track| track_affected_property(track) + track.item_incurred_increase < track_limit(track))
@@ -1470,6 +1471,7 @@ fn distribute_space_up_to_limits(
         if track_distribution_proportion_sum == 0.0 {
             break;
         }
+        let iteration_space = space_to_distribute as f32;
 
         // Compute item-incurred increase for this iteration
         let min_increase_limit = tracks
@@ -1483,21 +1485,30 @@ fn distribute_space_up_to_limits(
             .min_by(|a, b| a.total_cmp(b))
             .unwrap(); // We will never pass an empty track list to this function
         let iteration_item_incurred_increase =
-            f32_min(min_increase_limit, space_to_distribute / track_distribution_proportion_sum);
+            f32_min(min_increase_limit, iteration_space / track_distribution_proportion_sum);
 
-        for track in tracks.iter_mut().filter(|track| track_is_affected(track)) {
+        for (index, track) in tracks.iter_mut().enumerate().filter(|(_, track)| track_is_affected(track)) {
             let increase = iteration_item_incurred_increase * track_distribution_proportion(track);
             if increase > 0.0
                 && track_affected_property(track) + track.item_incurred_increase + increase
                     <= track_limit(track) + THRESHOLD
             {
                 track.item_incurred_increase += increase;
-                space_to_distribute -= increase;
+                space_to_distribute -= f64::from(increase);
+                last_increased_track = Some(index);
             }
         }
     }
 
-    space_to_distribute
+    // The space below the threshold is the rounding residual of the shares: the last increased track takes it, so the
+    // increases sum to the distributed space.
+    match last_increased_track {
+        Some(index) if space_to_distribute.abs() <= f64::from(THRESHOLD) => {
+            tracks[index].item_incurred_increase += space_to_distribute as f32;
+            0.0
+        }
+        _ => space_to_distribute as f32,
+    }
 }
 
 #[cfg(test)]

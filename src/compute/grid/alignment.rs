@@ -1,5 +1,6 @@
 //! Alignment of tracks and final positioning of items
 use super::types::GridTrack;
+use super::util::sum_f64;
 use crate::compute::common::alignment::{
     apply_alignment_fallback, compute_alignment_offset, resolve_self_alignment_safety,
 };
@@ -29,7 +30,7 @@ pub(super) fn align_tracks(
     track_alignment_style: AlignContent,
     axis_is_reversed: bool,
 ) {
-    let used_size: f32 = tracks.iter().map(|track| track.base_size).sum();
+    let used_size = sum_f64(tracks.iter().map(|track| track.base_size));
     let free_space = grid_container_content_box_size - used_size;
     let origin = padding.start + border.start;
 
@@ -53,7 +54,8 @@ pub(super) fn align_tracks(
     };
 
     // Compute offsets
-    let mut total_offset = origin + empty_grid_offset;
+    // The offsets accumulate in `f64`, so each track line keeps the exact sum of the sizes before it
+    let mut total_offset = f64::from(origin + empty_grid_offset);
     let mut seen_non_collapsed_track = false;
     tracks.iter_mut().enumerate().for_each(|(i, track)| {
         // Odd tracks are gutters (but slices are zero-indexed, so odd tracks have even indices)
@@ -69,8 +71,8 @@ pub(super) fn align_tracks(
             0.0
         };
 
-        track.offset = total_offset + offset;
-        total_offset = total_offset + offset + track.base_size;
+        track.offset = (total_offset + f64::from(offset)) as f32;
+        total_offset += f64::from(offset) + f64::from(track.base_size);
         if is_non_collapsed_track {
             seen_non_collapsed_track = true;
         }
