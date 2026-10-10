@@ -635,23 +635,11 @@ fn resolve_intrinsic_track_sizes<Tree: LayoutPartialTree>(
                 let track = &axis_tracks[track_index as usize];
 
                 // Handle base sizes
+                // A percentage of an indefinite grid size behaves as `auto` (CSS Grid 2 §7.2.1)
+                let min_behaves_as_auto = track.min_track_sizing_function.is_auto()
+                    || (track.min_track_sizing_function.uses_percentage() && axis_inner_node_size.is_none());
                 let new_base_size = match track.min_track_sizing_function.0.tag() {
-                    CompactLength::MIN_CONTENT_TAG => {
-                        f32_max(track.base_size, item_sizer.min_content_contribution(item, axis_tracks))
-                    }
-                    // If the container size is indefinite and has not yet been resolved then percentage sized
-                    // tracks should be treated as min-content (this matches Chrome's behaviour and seems sensible)
-                    CompactLength::PERCENT_TAG => {
-                        if axis_inner_node_size.is_none() {
-                            f32_max(track.base_size, item_sizer.min_content_contribution(item, axis_tracks))
-                        } else {
-                            track.base_size
-                        }
-                    }
-                    CompactLength::MAX_CONTENT_TAG => {
-                        f32_max(track.base_size, item_sizer.max_content_contribution(item, axis_tracks))
-                    }
-                    CompactLength::AUTO_TAG => {
+                    _ if min_behaves_as_auto => {
                         let space = match axis_available_grid_space {
                             // QUIRK: The spec says that:
                             //
@@ -675,19 +663,16 @@ fn resolve_intrinsic_track_sizes<Tree: LayoutPartialTree>(
                         };
                         f32_max(track.base_size, space)
                     }
-                    CompactLength::LENGTH_TAG => {
-                        // Do nothing as it's not an intrinsic track sizing function
-                        track.base_size
+                    CompactLength::MIN_CONTENT_TAG => {
+                        f32_max(track.base_size, item_sizer.min_content_contribution(item, axis_tracks))
                     }
-                    // Handle calc() like percentage
+                    CompactLength::MAX_CONTENT_TAG => {
+                        f32_max(track.base_size, item_sizer.max_content_contribution(item, axis_tracks))
+                    }
+                    // Do nothing as a definite length or percentage is not an intrinsic track sizing function
+                    CompactLength::LENGTH_TAG | CompactLength::PERCENT_TAG => track.base_size,
                     #[cfg(feature = "calc")]
-                    _ if track.min_track_sizing_function.0.is_calc() => {
-                        if axis_inner_node_size.is_none() {
-                            f32_max(track.base_size, item_sizer.min_content_contribution(item, axis_tracks))
-                        } else {
-                            track.base_size
-                        }
-                    }
+                    _ if track.min_track_sizing_function.0.is_calc() => track.base_size,
                     _ => unreachable!(),
                 };
                 let growth_limit_min_content_contribution = if !item.overflow.get(axis).is_scroll_container() {
