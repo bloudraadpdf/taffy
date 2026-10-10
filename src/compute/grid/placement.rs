@@ -147,6 +147,7 @@ pub(super) fn place_grid_items<'a, S, ChildIter>(
 
     // 2. Place remaining children with definite secondary axis positions
     let mut idx = 0;
+    let mut cursors = Vec::new();
     children_iter()
         .map(map_child_style_to_origin_zero_placement)
         .filter(|(_, _, placement, _)| {
@@ -159,11 +160,17 @@ pub(super) fn place_grid_items<'a, S, ChildIter>(
 
             let (primary_span, secondary_span) = place_definite_secondary_axis_item(
                 &*cell_occupancy_matrix,
+                &cursors,
                 child_placement,
                 grid_auto_flow,
                 direction,
                 explicit_col_count,
             );
+            let cursor = if axis_is_reversed(direction, primary_axis) { primary_span.start } else { primary_span.end };
+            match cursors.iter_mut().find(|(start, _)| *start == secondary_span.start) {
+                Some(entry) => entry.1 = cursor,
+                None => cursors.push((secondary_span.start, cursor)),
+            }
 
             record_grid_placement(
                 cell_occupancy_matrix,
@@ -290,8 +297,11 @@ fn place_definite_grid_item(
 
 /// 8.5. Grid Item Placement Algorithm
 /// Step 2. Place remaining children with definite secondary axis positions
+/// `cursors` holds, for each secondary axis start line, the primary axis line past the items this step placed with
+/// that start line: a sparse placement places an item past them (CSS Grid 1 §8.5 step 2).
 fn place_definite_secondary_axis_item(
     cell_occupancy_matrix: &CellOccupancyMatrix,
+    cursors: &[(OriginZeroLine, OriginZeroLine)],
     placement: InBothAbsAxis<Line<OriginZeroGridPlacement>>,
     auto_flow: GridAutoFlow,
     direction: Direction,
@@ -311,26 +321,15 @@ fn place_definite_secondary_axis_item(
     );
     let starting_position = match auto_flow.is_dense() {
         true => search_start_line(primary_axis_grid_start_line, primary_axis_grid_end_line, primary_axis_is_reversed),
-        false => {
-            let lookup_result = if primary_axis_is_reversed {
-                cell_occupancy_matrix.first_of_type(
-                    primary_axis,
-                    secondary_axis_placement.start,
-                    CellOccupancyState::AutoPlaced,
-                )
-            } else {
-                cell_occupancy_matrix.last_of_type(
-                    primary_axis,
-                    secondary_axis_placement.start,
-                    CellOccupancyState::AutoPlaced,
-                )
-            };
-            lookup_result.unwrap_or(search_start_line(
+        false => cursors
+            .iter()
+            .find(|(start, _)| *start == secondary_axis_placement.start)
+            .map(|(_, cursor)| *cursor)
+            .unwrap_or(search_start_line(
                 primary_axis_grid_start_line,
                 primary_axis_grid_end_line,
                 primary_axis_is_reversed,
-            ))
-        }
+            )),
     };
     let primary_axis_span = placement.get(primary_axis).indefinite_span();
 
