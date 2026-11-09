@@ -139,6 +139,9 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         height: outer_node_size.height.map(|space| space - content_box_inset.vertical_axis_sum()),
     };
 
+    // Intrinsic track sums later provide percentage bases, not definite space for stretching.
+    let definite_track_expansion_size = inner_node_size;
+
     debug_log!("parent_size", dbg:parent_size);
     debug_log!("outer_node_size", dbg:outer_node_size);
     debug_log!("inner_node_size", dbg:inner_node_size);
@@ -321,6 +324,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         tree,
         AbstractAxis::Inline,
         item_inline_axis,
+        definite_track_expansion_size.get(AbstractAxis::Inline),
         inner_min_size.get(AbstractAxis::Inline),
         inner_max_size.get(AbstractAxis::Inline),
         justify_content,
@@ -345,6 +349,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
         tree,
         AbstractAxis::Block,
         item_inline_axis,
+        definite_track_expansion_size.get(AbstractAxis::Block),
         inner_min_size.get(AbstractAxis::Block),
         inner_max_size.get(AbstractAxis::Block),
         align_content,
@@ -474,6 +479,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
             tree,
             AbstractAxis::Inline,
             item_inline_axis,
+            definite_track_expansion_size.get(AbstractAxis::Inline),
             inner_min_size.get(AbstractAxis::Inline),
             inner_max_size.get(AbstractAxis::Inline),
             justify_content,
@@ -541,6 +547,7 @@ pub fn compute_grid_layout<Tree: LayoutGridContainer>(
                 tree,
                 AbstractAxis::Block,
                 item_inline_axis,
+                definite_track_expansion_size.get(AbstractAxis::Block),
                 inner_min_size.get(AbstractAxis::Block),
                 inner_max_size.get(AbstractAxis::Block),
                 align_content,
