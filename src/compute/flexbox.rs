@@ -1451,7 +1451,15 @@ fn determine_container_main_size(
                                                 .maybe_sub(item.margin.cross_axis_sum(dir)),
                                         );
                                     }
-                                    ckd
+                                    // Preserve ratio transfer from the known cross size while ignoring authored sizes.
+                                    let adjustment = if tree.get_flexbox_child_style(item.node).box_sizing()
+                                        == BoxSizing::ContentBox
+                                    {
+                                        (item.padding + item.border).sum_axes()
+                                    } else {
+                                        Size::ZERO
+                                    };
+                                    item.transfer_size(ckd, adjustment)
                                 };
 
                                 // Either the min- or max- content size depending on which constraint we are sizing under.
@@ -1462,7 +1470,7 @@ fn determine_container_main_size(
                                     child_known_dimensions,
                                     constants.node_inner_size,
                                     child_available_space,
-                                    SizingMode::InherentSize,
+                                    SizingMode::ContentSize,
                                     dir.main_axis(),
                                     Line::FALSE,
                                 );
