@@ -78,6 +78,41 @@ pub trait CheapCloneStr {}
 #[cfg(not(any(feature = "alloc", feature = "std")))]
 impl<T> CheapCloneStr for T {}
 
+/// Validated physical space reserved between the border and padding edges.
+#[derive(Copy, Clone, Debug, PartialEq)]
+#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "serde", serde(try_from = "Rect<f32>", into = "Rect<f32>"))]
+pub struct ResolvedScrollbarGutters(Rect<f32>);
+
+impl ResolvedScrollbarGutters {
+    /// Reject non-finite or negative edge extents.
+    pub fn new(edges: Rect<f32>) -> Option<Self> {
+        [edges.left, edges.right, edges.top, edges.bottom, edges.left + edges.right, edges.top + edges.bottom]
+            .into_iter()
+            .all(|value| value.is_finite() && value >= 0.0)
+            .then_some(Self(edges))
+    }
+
+    /// Physical gutter edges, independently of scrollbar visibility.
+    pub const fn edges(self) -> Rect<f32> {
+        self.0
+    }
+}
+
+impl TryFrom<Rect<f32>> for ResolvedScrollbarGutters {
+    type Error = &'static str;
+
+    fn try_from(edges: Rect<f32>) -> Result<Self, Self::Error> {
+        Self::new(edges).ok_or("scrollbar gutter edges and totals must be finite and nonnegative")
+    }
+}
+
+impl From<ResolvedScrollbarGutters> for Rect<f32> {
+    fn from(gutters: ResolvedScrollbarGutters) -> Self {
+        gutters.edges()
+    }
+}
+
 /// The core set of styles that are shared between all CSS layout nodes
 ///
 /// Note that all methods come with a default implementation which simply returns the default value for that style property
@@ -129,6 +164,10 @@ pub trait CoreStyle {
     #[inline(always)]
     fn scrollbar_width(&self) -> f32 {
         0.0
+    }
+    /// Override style-derived gutters with resolved physical edge reservations.
+    fn resolved_scrollbar_gutters(&self) -> Option<ResolvedScrollbarGutters> {
+        None
     }
 
     // Position properties
@@ -467,6 +506,9 @@ pub struct Style<S: CheapCloneStr = DefaultCheapStr> {
     pub overflow: Point<Overflow>,
     /// How much space (in points) should be reserved for the scrollbars of `Overflow::Scroll` and `Overflow::Auto` nodes.
     pub scrollbar_width: f32,
+    /// Resolved physical gutter reservations; overrides the scalar width.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub resolved_scrollbar_gutters: Option<ResolvedScrollbarGutters>,
 
     #[cfg(feature = "float_layout")]
     /// Should the box be floated
@@ -637,6 +679,7 @@ impl<S: CheapCloneStr> Style<S> {
         direction: Direction::Ltr,
         overflow: Point { x: Overflow::Visible, y: Overflow::Visible },
         scrollbar_width: 0.0,
+        resolved_scrollbar_gutters: None,
         #[cfg(feature = "float_layout")]
         float: Float::None,
         #[cfg(feature = "float_layout")]
@@ -762,6 +805,9 @@ impl<S: CheapCloneStr> CoreStyle for Style<S> {
     fn scrollbar_width(&self) -> f32 {
         self.scrollbar_width
     }
+    fn resolved_scrollbar_gutters(&self) -> Option<ResolvedScrollbarGutters> {
+        self.resolved_scrollbar_gutters
+    }
     #[inline(always)]
     fn position(&self) -> Position {
         self.position
@@ -830,6 +876,9 @@ impl<T: CoreStyle> CoreStyle for &'_ T {
     #[inline(always)]
     fn scrollbar_width(&self) -> f32 {
         (*self).scrollbar_width()
+    }
+    fn resolved_scrollbar_gutters(&self) -> Option<ResolvedScrollbarGutters> {
+        (*self).resolved_scrollbar_gutters()
     }
     #[inline(always)]
     fn position(&self) -> Position {
@@ -1366,6 +1415,7 @@ mod tests {
             direction: Default::default(),
             overflow: Default::default(),
             scrollbar_width: 0.0,
+            resolved_scrollbar_gutters: None,
             position: Default::default(),
             #[cfg(feature = "flexbox")]
             flex_direction: Default::default(),
@@ -1497,6 +1547,8 @@ mod tests {
         assert_type_size::<AlignItems>(2);
         assert_type_size::<Option<AlignItems>>(2);
         assert_type_size::<Option<AlignContent>>(2);
+        assert_type_size::<ResolvedScrollbarGutters>(16);
+        assert_type_size::<Option<ResolvedScrollbarGutters>>(20);
 
         // Flexbox Container
         assert_type_size::<FlexDirection>(1);
@@ -1518,12 +1570,12 @@ mod tests {
         assert_type_size::<GridTemplateComponent<String>>(56);
         assert_type_size::<GridPlacement<String>>(32);
         assert_type_size::<Line<GridPlacement<String>>>(64);
-        assert_type_size::<Style<String>>(648);
+        assert_type_size::<Style<String>>(664);
 
         // String-type dependent (Arc<str>)
         assert_type_size::<GridTemplateComponent<Arc<str>>>(56);
         assert_type_size::<GridPlacement<Arc<str>>>(24);
         assert_type_size::<Line<GridPlacement<Arc<str>>>>(48);
-        assert_type_size::<Style<Arc<str>>>(616);
+        assert_type_size::<Style<Arc<str>>>(632);
     }
 }

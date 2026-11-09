@@ -305,7 +305,7 @@ struct BlockItem {
     /// The overflow style of the item
     overflow: Point<Overflow>,
     /// The width of the item's scrollbars (if it has scrollbars)
-    scrollbar_width: f32,
+    scrollbar_size: Size<f32>,
 
     /// The position style of the item
     position: Position,
@@ -450,19 +450,7 @@ fn compute_inner(
     let border = raw_border.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis));
     let direction = style.direction();
 
-    // Scrollbar gutters are reserved when the `overflow` property is set to `Overflow::Scroll`.
-    // However, the axis are switched (transposed) because a node that scrolls vertically needs
-    // *horizontal* space to be reserved for a scrollbar
-    let scrollbar_gutter = {
-        let offsets = style.overflow().transpose().map(|overflow| match overflow {
-            Overflow::Scroll => style.scrollbar_width(),
-            _ => 0.0,
-        });
-        match direction {
-            Direction::Ltr => Rect { top: 0.0, left: 0.0, right: offsets.x, bottom: offsets.y },
-            Direction::Rtl => Rect { top: 0.0, left: offsets.x, right: 0.0, bottom: offsets.y },
-        }
-    };
+    let scrollbar_gutter = crate::compute::scrollbar_gutters(&style);
     let padding_border = padding + border;
     let padding_border_size = padding_border.sum_axes();
     let content_box_inset = padding_border + scrollbar_gutter;
@@ -820,7 +808,7 @@ fn generate_item_list(
                     .maybe_apply_aspect_ratio(aspect_ratio)
                     .maybe_add(box_sizing_adjustment),
                 overflow,
-                scrollbar_width: child_style.scrollbar_width(),
+                scrollbar_size: crate::compute::scrollbar_gutters(&child_style).sum_axes(),
                 position,
                 inset: child_style.inset(),
                 margin: child_style.margin(),
@@ -967,10 +955,7 @@ fn perform_final_layout_on_in_flow_children(
             let item_non_auto_margin = item_margin.map(|m| m.unwrap_or(0.0));
             let item_non_auto_x_margin_sum = item_non_auto_margin.horizontal_axis_sum();
 
-            let scrollbar_size = Size {
-                width: if item.overflow.y == Overflow::Scroll { item.scrollbar_width } else { 0.0 },
-                height: if item.overflow.x == Overflow::Scroll { item.scrollbar_width } else { 0.0 },
-            };
+            let scrollbar_size = item.scrollbar_size;
 
             // Handle floated boxes
             #[cfg(feature = "float_layout")]
@@ -1690,10 +1675,7 @@ fn perform_absolute_layout_on_absolute_children(
         };
         // Note: axis intentionally switched here as scrollbars take up space in the opposite axis
         // to the axis in which scrolling is enabled.
-        let scrollbar_size = Size {
-            width: if item.overflow.y == Overflow::Scroll { item.scrollbar_width } else { 0.0 },
-            height: if item.overflow.x == Overflow::Scroll { item.scrollbar_width } else { 0.0 },
-        };
+        let scrollbar_size = item.scrollbar_size;
 
         tree.set_unrounded_layout(
             item.node_id,

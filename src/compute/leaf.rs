@@ -1,7 +1,7 @@
 //! Computes size using styles and measure functions
 
 use crate::geometry::{Point, Size};
-use crate::style::{AvailableSpace, Overflow, Position};
+use crate::style::{AvailableSpace, Position};
 use crate::tree::{CollapsibleMarginSet, RunMode};
 use crate::tree::{LayoutInput, LayoutOutput, SizingMode};
 use crate::util::debug::debug_log;
@@ -72,17 +72,7 @@ where
         }
     };
 
-    // Scrollbar gutters are reserved when the `overflow` property is set to `Overflow::Scroll`.
-    // However, the axis are switched (transposed) because a node that scrolls vertically needs
-    // *horizontal* space to be reserved for a scrollbar
-    let scrollbar_gutter = style.overflow().transpose().map(|overflow| match overflow {
-        Overflow::Scroll => style.scrollbar_width(),
-        _ => 0.0,
-    });
-    // TODO: make side configurable based on the `direction` property
-    let mut content_box_inset = padding_border;
-    content_box_inset.right += scrollbar_gutter.x;
-    content_box_inset.bottom += scrollbar_gutter.y;
+    let content_box_inset = padding_border + crate::compute::scrollbar_gutters(&style);
 
     let has_styles_preventing_being_collapsed_through = !style.is_block()
         || style.overflow().x.is_scroll_container()

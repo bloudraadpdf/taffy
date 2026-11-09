@@ -6,8 +6,7 @@ use crate::compute::common::alignment::{
 };
 use crate::geometry::{AbsoluteAxis, InBothAbsAxis, Line, Point, Rect, Size};
 use crate::style::{
-    AlignContent, AlignItems, AlignItemsKeyword, AlignSelf, AvailableSpace, CoreStyle, GridItemStyle, Overflow,
-    Position,
+    AlignContent, AlignItems, AlignItemsKeyword, AlignSelf, AvailableSpace, CoreStyle, GridItemStyle, Position,
 };
 use crate::tree::{
     InlinePercentageBasis, Layout, LayoutInput, LayoutPartialTreeExt, NodeId, RequestedAxis, RunMode, SizingMode,
@@ -100,7 +99,7 @@ pub(super) fn align_and_position_item(
     let style = tree.get_grid_child_style(node);
 
     let overflow = style.overflow();
-    let scrollbar_width = style.scrollbar_width();
+    let scrollbar_size = crate::compute::scrollbar_gutters(&style).sum_axes();
     let aspect_ratio = style.aspect_ratio();
     // Resolve writing-mode-relative self-start/self-end keywords against the item's own
     // direction. The horizontal axis is the inline axis (Taffy only supports horizontal-tb);
@@ -297,11 +296,6 @@ pub(super) fn align_and_position_item(
         baseline_shim,
         Direction::Ltr,
     );
-
-    let scrollbar_size = Size {
-        width: if overflow.y == Overflow::Scroll { scrollbar_width } else { 0.0 },
-        height: if overflow.x == Overflow::Scroll { scrollbar_width } else { 0.0 },
-    };
 
     let resolved_margin = Rect { left: x_margin.start, right: x_margin.end, top: y_margin.start, bottom: y_margin.end };
 

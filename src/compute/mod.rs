@@ -21,6 +21,20 @@
 //! | [`round_layout`]                  | [`RoundTree`]                                                                                                                                                                                      | Round a tree of float-valued layouts to integer pixels               |
 //! | [`print_tree`](crate::print_tree) | [`PrintTree`](crate::PrintTree)                                                                                                                                                                    | Print a debug representation of a node tree and it's computed layout |
 //!
+pub(crate) fn scrollbar_gutters(style: &impl crate::style::CoreStyle) -> crate::geometry::Rect<f32> {
+    use crate::geometry::Rect;
+    if let Some(gutters) = style.resolved_scrollbar_gutters() {
+        return gutters.edges();
+    }
+    let width = if style.overflow().y == crate::style::Overflow::Scroll { style.scrollbar_width() } else { 0.0 };
+    let height = if style.overflow().x == crate::style::Overflow::Scroll { style.scrollbar_width() } else { 0.0 };
+    if style.direction().is_rtl() {
+        Rect { left: width, right: 0.0, top: 0.0, bottom: height }
+    } else {
+        Rect { left: 0.0, right: width, top: 0.0, bottom: height }
+    }
+}
+
 pub(crate) mod common;
 pub(crate) mod leaf;
 
@@ -51,7 +65,7 @@ pub use self::grid::compute_grid_layout;
 pub use self::float::{BfcSlot, ContentSlot, FloatContext, FloatIntrinsicWidthCalculator};
 
 use crate::geometry::{Line, Point, Size};
-use crate::style::{AvailableSpace, CoreStyle, Overflow};
+use crate::style::{AvailableSpace, CoreStyle};
 use crate::tree::{
     Layout, LayoutInput, LayoutOutput, LayoutPartialTree, LayoutPartialTreeExt, NodeId, RoundTree, SizingMode,
 };
@@ -136,10 +150,7 @@ pub fn compute_root_layout(tree: &mut impl LayoutPartialTree, root: NodeId, avai
         style.border().resolve_or_zero(available_space.width.into_option(), |val, basis| tree.calc(val, basis));
     let margin =
         style.margin().resolve_or_zero(available_space.width.into_option(), |val, basis| tree.calc(val, basis));
-    let scrollbar_size = Size {
-        width: if style.overflow().y == Overflow::Scroll { style.scrollbar_width() } else { 0.0 },
-        height: if style.overflow().x == Overflow::Scroll { style.scrollbar_width() } else { 0.0 },
-    };
+    let scrollbar_size = scrollbar_gutters(&style).sum_axes();
     let location = Point {
         x: if style.direction().is_rtl() {
             available_space.width.into_option().map_or(0.0, |available_width| available_width - output.size.width)
