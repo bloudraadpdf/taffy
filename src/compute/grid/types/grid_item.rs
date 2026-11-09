@@ -98,6 +98,8 @@ pub(in super::super) struct GridItem {
     pub border: Rect<LengthPercentage>,
     /// The item's margin style
     pub margin: Rect<LengthPercentageAuto>,
+    /// Extra margins inherited from subgrid gap differences.
+    pub subgrid_margin: Rect<f32>,
     /// The item's align_self property, or the parent's align_items property is not set
     pub align_self: AlignSelf,
     /// The item's justify_self property, or the parent's justify_items property is not set
@@ -166,6 +168,7 @@ impl GridItem {
             padding: style.padding(),
             border: style.border(),
             margin: style.margin(),
+            subgrid_margin: style.grid_subgrid_margin(),
             align_self: style.align_self().unwrap_or(parent_align_items),
             justify_self: style.justify_self().unwrap_or(parent_justify_items),
             baseline: None,
@@ -452,13 +455,13 @@ impl GridItem {
         tree: &impl LayoutPartialTree,
     ) -> Size<f32> {
         let edge_basis = inline_percentage_basis(grid_area_size, item_inline_axis, contribution_axis);
-        Rect {
+        (Rect {
             left: self.margin.left.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)),
             right: self.margin.right.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)),
             top: self.margin.top.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)) + self.baseline_shim,
             bottom: self.margin.bottom.resolve_or_zero(edge_basis, |val, basis| tree.calc(val, basis)),
-        }
-        .sum_axes()
+        } + self.subgrid_margin)
+            .sum_axes()
     }
 
     /// Resolve the physical top margin against the grid area's logical inline size
@@ -473,7 +476,7 @@ impl GridItem {
         self.margin.top.resolve_or_zero(
             inline_percentage_basis(grid_area_size, item_inline_axis, contribution_axis),
             |val, basis| tree.calc(val, basis),
-        )
+        ) + self.subgrid_margin.top
     }
 
     /// Build the inline percentage basis passed to this item's child layout
