@@ -672,7 +672,10 @@ impl GridItem {
                         self.spanned_fixed_track_limit(axis, axis_tracks, inner_node_size.get(axis), &|val, basis| {
                             tree.resolve_calc_value(val, basis)
                         });
-                    minimum_contribution.maybe_min(limit)
+                    let margins = self
+                        .margins_axis_sums_with_baseline_shims(grid_area_size, item_inline_axis, axis, tree)
+                        .get(axis);
+                    minimum_contribution.maybe_min(limit.map(|limit| limit - margins))
                 } else {
                     0.0
                 }
