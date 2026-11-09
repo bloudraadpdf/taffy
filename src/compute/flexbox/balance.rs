@@ -1,6 +1,7 @@
 use core::num::NonZeroU32;
 use core::ops::Range;
 
+use super::line_exceeds_available_space;
 use crate::geometry::Line;
 use crate::util::sys::Vec;
 
@@ -176,7 +177,10 @@ impl BalanceInput {
     /// Whether a following zero item could instead join this line.
     fn forces_singleton(&self, start: usize, end: usize) -> bool {
         self.end_sizes.get(end) == Some(&0.0)
-            && self.limit.map_or(true, |limit| self.length(start, end) <= limit && self.length(start, end + 1) <= limit)
+            && self.limit.map_or(true, |limit| {
+                !line_exceeds_available_space(self.length(start, end), limit)
+                    && !line_exceeds_available_space(self.length(start, end + 1), limit)
+            })
     }
 
     /// Count the fewest capacity-constrained lines.
@@ -185,7 +189,7 @@ impl BalanceInput {
         let mut lines = 1;
         let mut start = 0;
         for end in 1..=self.starts.len() {
-            if end > start + 1 && self.length(start, end) > limit {
+            if end > start + 1 && line_exceeds_available_space(self.length(start, end), limit) {
                 lines += 1;
                 start = end - 1;
             }
@@ -198,11 +202,15 @@ impl BalanceInput {
         let boundary = self.ends[end - 1];
         let center = boundary - self.limit.unwrap_or(0.0);
         let upper = costs.starts.len();
-        let lower = self.limit.map_or(0, |limit| costs.starts.partition_point(|&start| start < boundary - limit));
+        let lower = self.limit.map_or(0, |limit| {
+            costs.starts.partition_point(|&start| line_exceeds_available_space(boundary - start, limit))
+        });
         if self.end_sizes.get(end) == Some(&0.0) {
             let split = self
                 .limit
-                .map_or(lower, |limit| costs.starts.partition_point(|&start| start < self.ends[end] - limit))
+                .map_or(lower, |limit| {
+                    costs.starts.partition_point(|&start| line_exceeds_available_space(self.ends[end] - start, limit))
+                })
                 .clamp(lower, upper);
             costs.insert(lower..split, LineCost { end, center, suffix: normal });
             costs.insert(split..upper, LineCost { end, center, suffix: singleton });

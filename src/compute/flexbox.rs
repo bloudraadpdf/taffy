@@ -1302,8 +1302,11 @@ fn partition_flex_lines<'a>(
                             line_length += child.hypothetical_outer_size.main(constants.dir) + gap_contribution;
                             let trimmed_length = line_length - constants.trimmed_main_margins(child).end;
                             visible_count += 1;
-                            let precision = f32::EPSILON * trimmed_length.abs().max(main_axis_available_space.abs());
-                            trimmed_length - main_axis_available_space > precision && visible_count > 1 && idx != 0
+                            line_exceeds_available_space(
+                                f64::from(trimmed_length),
+                                f64::from(main_axis_available_space),
+                            ) && visible_count > 1
+                                && idx != 0
                         })
                         .map(|(idx, _)| idx)
                         .unwrap_or(flex_items.len());
@@ -1316,6 +1319,15 @@ fn partition_flex_lines<'a>(
             }
         }
     }
+}
+
+/// Compare line lengths without promoting input f32 roundoff into an extra line.
+fn line_exceeds_available_space(length: f64, available: f64) -> bool {
+    if !length.is_finite() || !available.is_finite() {
+        return length > available;
+    }
+    let precision = f64::from(f32::EPSILON) * length.abs().max(available.abs());
+    length - available > precision
 }
 
 /// Determine the container's main size (if not already known)
