@@ -1465,7 +1465,7 @@ fn determine_container_main_size(
                                     SizingMode::InherentSize,
                                     dir.main_axis(),
                                     Line::FALSE,
-                                ) + item.margin.main_axis_sum(constants.dir);
+                                );
 
                                 // This is somewhat bizarre in that it's asymmetrical depending whether the flex container is a column or a row.
                                 //
@@ -1479,11 +1479,12 @@ fn determine_container_main_size(
                                 //
                                 // Ultimately, this was not found by reading the spec, but by trial and error fixing tests to align with Webkit/Firefox output.
                                 // (see the `flex_basis_unconstraint_row` and `flex_basis_uncontraint_column` generated tests which demonstrate this)
-                                if constants.is_row {
+                                let border_box_contribution = if constants.is_row {
                                     content_main_size.maybe_clamp(style_min, style_max)
                                 } else {
                                     content_main_size.max(item.flex_basis).maybe_clamp(style_min, style_max)
-                                }
+                                };
+                                border_box_contribution + item.margin.main_axis_sum(constants.dir)
                             }
                         };
                         item.outer_target_size.set_main(constants.dir, content_contribution);
