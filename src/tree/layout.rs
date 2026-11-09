@@ -52,6 +52,8 @@ impl InlinePercentageBasis {
 #[derive(Debug, Copy, Clone, PartialEq)]
 #[cfg_attr(feature = "serde", derive(Serialize))]
 pub struct MeasureInput {
+    /// Whether measurement ignores the node's authored size constraints.
+    pub sizing_mode: SizingMode,
     /// Dimensions which should be taken as fixed when measuring the node
     pub known_dimensions: Size<Option<f32>>,
     /// The size of the node's containing block

@@ -335,6 +335,7 @@ where
                     let measure_function = |known_dimensions, available_space| {
                         (tree.measure_function)(
                             MeasureInput {
+                                sizing_mode: inputs.sizing_mode,
                                 known_dimensions,
                                 parent_size: inputs.parent_size,
                                 inline_percentage_basis: inputs.inline_percentage_basis,

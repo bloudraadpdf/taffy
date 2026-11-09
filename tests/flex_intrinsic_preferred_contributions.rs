@@ -38,14 +38,25 @@ fn intrinsic_main_contributions_measure_content_before_applying_preferred_size()
                         &[item],
                     )
                     .unwrap();
-                tree.compute_layout_with_measure(root, Size::MAX_CONTENT, |known, _, _, _, _| {
-                    let intrinsic = axis_size(row, 150.0, 100.0);
-                    Size {
-                        width: known.width.unwrap_or(intrinsic.width),
-                        height: known.height.unwrap_or(intrinsic.height),
-                    }
-                })
+                let mut saw_content_measurement = false;
+                tree.compute_layout_with_measure_and_calc(
+                    root,
+                    Size::MAX_CONTENT,
+                    |input, _, _, _| {
+                        saw_content_measurement |= input.sizing_mode == taffy::SizingMode::ContentSize;
+                        let known = input.known_dimensions;
+                        let intrinsic = axis_size(row, 150.0, 100.0);
+                        Size {
+                            width: known.width.unwrap_or(intrinsic.width),
+                            height: known.height.unwrap_or(intrinsic.height),
+                        }
+                    },
+                    |_, _| unreachable!("this fixture has no calc values"),
+                )
                 .unwrap();
+                if preferred < 150.0 {
+                    assert!(saw_content_measurement, "{direction:?}/{preferred}/{grow}");
+                }
                 // Flexbox 9.9.3: max(content, preferred), capped by the base only
                 // when the item cannot grow. The preferred size is not the content size.
                 let expected = if grow == 0.0 { 150.0 } else { preferred.max(150.0) };
