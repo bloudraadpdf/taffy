@@ -1302,7 +1302,8 @@ fn partition_flex_lines<'a>(
                             line_length += child.hypothetical_outer_size.main(constants.dir) + gap_contribution;
                             let trimmed_length = line_length - constants.trimmed_main_margins(child).end;
                             visible_count += 1;
-                            trimmed_length > main_axis_available_space && visible_count > 1 && idx != 0
+                            let precision = f32::EPSILON * trimmed_length.abs().max(main_axis_available_space.abs());
+                            trimmed_length - main_axis_available_space > precision && visible_count > 1 && idx != 0
                         })
                         .map(|(idx, _)| idx)
                         .unwrap_or(flex_items.len());

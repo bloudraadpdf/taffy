@@ -162,3 +162,40 @@ fn flex_lines_remain_observable_when_item_alignment_changes_offsets() {
     };
     assert_eq!(info.lines, [vec![first, second], vec![third]]);
 }
+
+#[test]
+fn percentage_ratio_roundoff_does_not_create_an_extra_flex_line() {
+    for direction in [FlexDirection::Row, FlexDirection::RowReverse, FlexDirection::Column, FlexDirection::ColumnReverse] {
+        let row = matches!(direction, FlexDirection::Row | FlexDirection::RowReverse);
+        let size = |main, cross| if row { Size { width: main, height: cross } } else { Size { width: cross, height: main } };
+        for wrap in [FlexWrap::Wrap, FlexWrap::WrapReverse] {
+            for real_overflow in [false, true] {
+                let mut tree = TaffyTree::<()>::new();
+                let items: Vec<_> = (0..4).map(|_| tree.new_leaf(Style {
+                    size: size(if real_overflow { length(45.01) } else { auto() }, percent(0.6)),
+                    aspect_ratio: Some(1.0),
+                    flex_shrink: 0.0,
+                    ..Default::default()
+                }).unwrap()).collect();
+                let root = tree.new_with_children(Style {
+                    display: Display::Flex,
+                    flex_direction: direction,
+                    flex_wrap: wrap,
+                    size: size(length(105.0), length(75.0)),
+                    gap: Size { width: length(15.0), height: length(15.0) },
+                    ..Default::default()
+                }, &items).unwrap();
+                tree.compute_layout(root, Size::MAX_CONTENT).unwrap();
+                let DetailedLayoutInfo::Flex(info) = tree.detailed_layout_info(root) else {
+                    panic!("flex layout must retain its line partition");
+                };
+                let expected = if real_overflow {
+                    items.iter().map(|&item| vec![item]).collect::<Vec<_>>()
+                } else {
+                    vec![items[0..2].to_vec(), items[2..4].to_vec()]
+                };
+                assert_eq!(info.lines, expected, "{direction:?}/{wrap:?}/overflow:{real_overflow}");
+            }
+        }
+    }
+}
