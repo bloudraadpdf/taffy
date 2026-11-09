@@ -253,7 +253,11 @@ pub(super) fn align_and_position_item(
                 known_dimensions,
                 parent_size: grid_area_size.map(Option::Some),
                 inline_percentage_basis: InlinePercentageBasis::Explicit(edge_basis),
-                available_space: grid_area_minus_item_margins_size.map(AvailableSpace::Definite),
+                available_space: Size {
+                    width: grid_area_size.width - subgrid_margin.left - subgrid_margin.right,
+                    height: grid_area_size.height - subgrid_margin.top - subgrid_margin.bottom - baseline_shim,
+                }
+                .map(AvailableSpace::Definite),
                 sizing_mode: SizingMode::InherentSize,
                 axis: RequestedAxis::Both,
                 run_mode,
