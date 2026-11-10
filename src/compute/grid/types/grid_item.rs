@@ -509,6 +509,7 @@ impl GridItem {
 
         // The child sees the grid area as its containing block during intrinsic measurement, so
         // percentage box properties resolve against the grid area when that size is definite.
+        // Cyclic replaced maxima need the same zero basis as preferred sizes for min-content.
         // Spec:
         // https://www.w3.org/TR/css-grid-1/#grid-item-sizing
         // https://www.w3.org/TR/css-grid-1/#algo-overview
@@ -516,7 +517,7 @@ impl GridItem {
             self.node,
             LayoutInput {
                 known_dimensions,
-                parent_size: grid_area_size,
+                parent_size: preferred_size_basis(grid_area_size, axis, contribution, self.is_compressible_replaced),
                 inline_percentage_basis: InlinePercentageBasis::Explicit(inline_percentage_basis(
                     grid_area_size,
                     item_inline_axis,
@@ -717,6 +718,7 @@ mod tests {
 
     struct TestTree {
         style: Style,
+        last_input: Option<LayoutInput>,
     }
 
     impl TraversePartialTree for TestTree {
@@ -745,14 +747,15 @@ mod tests {
 
         fn set_unrounded_layout(&mut self, _node_id: NodeId, _layout: &Layout) {}
 
-        fn compute_child_layout(&mut self, _node_id: NodeId, _inputs: LayoutInput) -> LayoutOutput {
+        fn compute_child_layout(&mut self, _node_id: NodeId, inputs: LayoutInput) -> LayoutOutput {
+            self.last_input = Some(inputs);
             LayoutOutput::from_outer_size(Size::ZERO)
         }
     }
 
     #[test]
     fn definite_area_margins_resolve_all_physical_edges() {
-        let tree = TestTree { style: Style::default() };
+        let tree = TestTree { style: Style::default(), last_input: None };
         let margin = LengthPercentageAuto::percent(0.1);
         let item = GridItem::new_with_placement_style_and_order(
             NodeId::new(0),
@@ -788,6 +791,44 @@ mod tests {
             preferred_size_basis(area, AbstractAxis::Inline, IntrinsicContribution::MinContent, true),
             Size { width: Some(0.0), height: Some(80.0) }
         );
+    }
+
+    #[test]
+    fn replaced_min_content_forwards_the_zero_basis_to_child_maximum_constraints() {
+        for axis in [AbstractAxis::Inline, AbstractAxis::Block] {
+            for (replaced, contribution, definite) in [
+                (true, IntrinsicContribution::MinContent, false),
+                (true, IntrinsicContribution::MaxContent, false),
+                (false, IntrinsicContribution::MinContent, false),
+                (true, IntrinsicContribution::MinContent, true),
+            ] {
+                let style = Style::<DefaultCheapStr> {
+                    item_is_replaced: replaced,
+                    max_size: Size { width: Dimension::percent(0.5), height: Dimension::percent(0.5) },
+                    ..Default::default()
+                };
+                let item = GridItem::new_with_placement_style_and_order(
+                    NodeId::new(0),
+                    Line { start: OriginZeroLine(0), end: OriginZeroLine(1) },
+                    Line { start: OriginZeroLine(0), end: OriginZeroLine(1) },
+                    &style,
+                    AlignItems::START,
+                    AlignItems::START,
+                    0,
+                );
+                let mut area = Size { width: Some(80.0), height: Some(80.0) };
+                area.set(axis, definite.then_some(30.0));
+                let mut tree = TestTree { style, last_input: None };
+                item.content_contribution(axis, &mut tree, area, AbsoluteAxis::Horizontal, Size::NONE, contribution);
+                let input = tree.last_input.expect("the contribution must measure its child");
+                let mut expected = area;
+                if replaced && contribution == IntrinsicContribution::MinContent && !definite {
+                    expected.set(axis, Some(0.0));
+                    assert_eq!(input.known_dimensions.get(axis), None);
+                }
+                assert_eq!(input.parent_size, expected, "{axis:?}; {contribution:?}; replaced={replaced}");
+            }
+        }
     }
 
     #[test]
