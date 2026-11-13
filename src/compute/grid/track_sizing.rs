@@ -646,11 +646,10 @@ fn resolve_intrinsic_track_sizes<Tree: LayoutPartialTree>(
                             //   If the grid container is being sized under a min- or max-content constraint, use the items’ limited
                             //   min-content contributions in place of their minimum contributions here.
                             //
-                            // However, in practice browsers only seem to apply this rule if the item is not a scroll container
-                            // (note that overflow:hidden counts as a scroll container), giving the automatic minimum size of scroll
-                            // containers (zero) precedence over the min-content contributions.
+                            // Browsers give explicit minimums and scroll-container automatic minimums precedence over
+                            // limited min-content contributions.
                             AvailableSpace::MinContent | AvailableSpace::MaxContent
-                                if !item.overflow.get(axis).is_scroll_container() =>
+                                if item.min_size.get(axis).is_auto() && !item.overflow.get(axis).is_scroll_container() =>
                             {
                                 let axis_minimum_size = item_sizer.minimum_contribution(item, axis_tracks);
                                 let axis_min_content_size = item_sizer.min_content_contribution(item, axis_tracks);
@@ -742,11 +741,11 @@ fn resolve_intrinsic_track_sizes<Tree: LayoutPartialTree>(
             //   If the grid container is being sized under a min- or max-content constraint, use the items’ limited min-content contributions
             //   in place of their minimum contributions here.
             //
-            // However, in practice browsers only seem to apply this rule if the item is not a scroll container (note that overflow:hidden counts as
-            // a scroll container), giving the automatic minimum size of scroll containers (zero) precedence over the min-content contributions.
+            // Browsers give explicit minimums and scroll-container automatic minimums precedence over
+            // limited min-content contributions.
             let space = match axis_available_grid_space {
                 AvailableSpace::MinContent | AvailableSpace::MaxContent
-                    if !item.overflow.get(axis).is_scroll_container() =>
+                    if item.min_size.get(axis).is_auto() && !item.overflow.get(axis).is_scroll_container() =>
                 {
                     let axis_minimum_size = item_sizer.minimum_contribution(item, axis_tracks);
                     let axis_min_content_size = item_sizer.min_content_contribution(item, axis_tracks);

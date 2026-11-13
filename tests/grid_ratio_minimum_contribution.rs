@@ -17,11 +17,10 @@ mod tests {
             for available in [AvailableSpace::MinContent, AvailableSpace::Definite(0.0)] {
                 for overflow in [Overflow::Visible, Overflow::Clip, Overflow::Hidden] {
                     let automatic_minimum: f32 = if overflow == Overflow::Hidden { 0.0 } else { 200.0 };
-                    let intrinsic_floor = if available == AvailableSpace::MinContent { automatic_minimum } else { 0.0 };
                     for (preferred, minimum, maximum, expected) in [
                         (auto(), auto(), auto(), automatic_minimum),
-                        (auto(), length(0.0), auto(), intrinsic_floor),
-                        (auto(), length(80.0), auto(), intrinsic_floor.max(80.0)),
+                        (auto(), length(0.0), auto(), 0.0),
+                        (auto(), length(80.0), auto(), 80.0),
                         (length(80.0), auto(), auto(), 80.0),
                         (auto(), auto(), length(80.0), automatic_minimum.min(80.0)),
                     ] {
