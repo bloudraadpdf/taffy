@@ -11,12 +11,13 @@
     </div>
   </input>
   <expectations>
-    <node x="0" y="0" width="0" height="100">
-      <node x="0" y="0" width="0" height="100">
-        <node x="-70" y="0" width="70" height="100"/>
+    <!-- CSS Flexbox 9.9.3: the content size of an item is the floor of its contribution. Chromium gives width 0. -->
+    <node x="0" y="0" width="90" height="100">
+      <node x="45" y="0" width="45" height="100">
+        <node x="-25" y="0" width="70" height="100"/>
       </node>
-      <node x="0" y="0" width="0" height="100">
-        <node x="-20" y="0" width="20" height="100"/>
+      <node x="0" y="0" width="45" height="100">
+        <node x="25" y="0" width="20" height="100"/>
       </node>
     </node>
   </expectations>
