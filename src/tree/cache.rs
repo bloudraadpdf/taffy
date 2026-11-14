@@ -106,6 +106,11 @@ impl CacheKey {
     fn x_axis_parent_size(&self) -> u64 {
         self.parent_size & (X_AXIS_VALUE_MASK & NON_SIGN_BITS_MASK)
     }
+
+    /// Return true if a size measured for this key holds each axis that `request` reads
+    fn measures_axes_of(&self, request: &Self) -> bool {
+        request.parent_size & BOTH_SIGN_BITS_MASK & !self.parent_size == 0
+    }
 }
 
 impl From<&LayoutInput> for CacheKey {
@@ -234,6 +239,7 @@ impl Cache {
                     if entry.key.kd_available_space == key.kd_available_space
                         && (entry.key.x_axis_parent_size() == key.x_axis_parent_size())
                         && entry.key.inline_percentage_basis == key.inline_percentage_basis
+                        && entry.key.measures_axes_of(&key)
                     {
                         return Some(LayoutOutput::from_outer_size(entry.content));
                     }
@@ -316,5 +322,17 @@ mod tests {
         assert!(cache.get(&original).is_some());
         assert!(cache.get(&input(InlinePercentageBasis::Explicit(Some(200.0)))).is_none());
         assert!(cache.get(&input(InlinePercentageBasis::Explicit(None))).is_none());
+    }
+
+    #[test]
+    fn measurement_cache_answers_only_the_axes_that_an_entry_measured() {
+        let axes = [RequestedAxis::Horizontal, RequestedAxis::Vertical, RequestedAxis::Both];
+        let request = |axis| LayoutInput { axis, ..input(InlinePercentageBasis::ParentWidth) };
+        for (measured, readable) in axes.into_iter().zip([[true, false, false], [false, true, false], [true; 3]]) {
+            let mut cache = Cache::new();
+            cache.store(&request(measured), LayoutOutput::from_outer_size(Size { width: 10.0, height: 20.0 }));
+
+            assert_eq!(axes.map(|axis| cache.get(&request(axis)).is_some()), readable, "{measured:?}");
+        }
     }
 }
