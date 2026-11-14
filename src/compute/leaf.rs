@@ -133,18 +133,25 @@ where
     };
 
     // Measure node
-    let measured_size = measure_function(
-        match run_mode {
-            RunMode::ComputeSize => known_dimensions,
-            RunMode::PerformLayout => Size::NONE,
-            RunMode::PerformHiddenLayout => unreachable!(),
-        },
-        available_space,
-    );
-    let clamped_size = known_dimensions
-        .or(node_size)
-        .unwrap_or(measured_size + content_box_inset.sum_axes())
-        .maybe_clamp(node_min_size, node_max_size);
+    let known_size = known_dimensions.or(node_size);
+    let measured_size = if reads_measured_size(
+        known_size,
+        cfg!(feature = "content_size"),
+        has_styles_preventing_being_collapsed_through,
+    ) {
+        measure_function(
+            match run_mode {
+                RunMode::ComputeSize => known_dimensions,
+                RunMode::PerformLayout => Size::NONE,
+                RunMode::PerformHiddenLayout => unreachable!(),
+            },
+            available_space,
+        )
+    } else {
+        Size::ZERO
+    };
+    let clamped_size =
+        known_size.unwrap_or(measured_size + content_box_inset.sum_axes()).maybe_clamp(node_min_size, node_max_size);
     let size = Size {
         width: clamped_size.width,
         height: f32_max(clamped_size.height, aspect_ratio.map(|ratio| clamped_size.width / ratio).unwrap_or(0.0)),
@@ -161,5 +168,37 @@ where
         margins_can_collapse_through: !has_styles_preventing_being_collapsed_through
             && size.height == 0.0
             && measured_size.height == 0.0,
+    }
+}
+
+/// Return true if the layout of a leaf reads the size that its measure function gives
+///
+/// The measured size gives each dimension that is not known, the content size, and the collapse-through state of a
+/// node whose styles let margins collapse through it.
+fn reads_measured_size(
+    known_size: Size<Option<f32>>,
+    content_size_is_output: bool,
+    styles_prevent_collapse_through: bool,
+) -> bool {
+    content_size_is_output
+        || !styles_prevent_collapse_through
+        || known_size.width.is_none()
+        || known_size.height.is_none()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::reads_measured_size;
+    use crate::geometry::Size;
+
+    #[test]
+    fn a_known_size_needs_a_measurement_only_for_the_content_size_or_the_collapse_state() {
+        let known = Size { width: Some(1.0), height: Some(1.0) };
+
+        assert!(!reads_measured_size(known, false, true));
+        assert!(reads_measured_size(known, true, true));
+        assert!(reads_measured_size(known, false, false));
+        assert!(reads_measured_size(Size { width: None, ..known }, false, true));
+        assert!(reads_measured_size(Size { height: None, ..known }, false, true));
     }
 }
