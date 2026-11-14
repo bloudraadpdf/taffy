@@ -1,8 +1,9 @@
 use roxmltree::Document;
 use std::{fmt::Debug, io::Write, path::PathBuf, str::FromStr};
 use taffy::{
-    prelude::TaffyZero as _, AvailableSpace, CheapCloneStr, Dimension, GridAutoTracks, GridTemplateComponent,
-    GridTemplateTracks, LengthPercentage, LengthPercentageAuto, Line, NodeId, Point, PrintTree, Rect, Size, TaffyTree,
+    prelude::TaffyZero as _, style::FlexMainSizing, AvailableSpace, CheapCloneStr, Dimension, FlexDirection,
+    GridAutoTracks, GridTemplateComponent, GridTemplateTracks, LengthPercentage, LengthPercentageAuto, Line, NodeId,
+    Point, PrintTree, Rect, Size, TaffyTree,
 };
 use taffy_test_helpers::{test_measure_function, TestNodeContext};
 
@@ -238,14 +239,23 @@ fn build_expectations(xnode: roxmltree::Node, node_id: NodeId) -> OutputNode {
     }
 }
 
+/// The fixtures are horizontal documents: the main axis of a column container is its block axis.
+fn block_axis_main_sizing(direction: FlexDirection) -> FlexMainSizing {
+    match direction {
+        FlexDirection::Column | FlexDirection::ColumnReverse => FlexMainSizing::HypotheticalItems,
+        FlexDirection::Row | FlexDirection::RowReverse => FlexMainSizing::IntrinsicContributions,
+    }
+}
+
 fn build_style<S: CheapCloneStr>(xnode: roxmltree::Node) -> taffy::Style<S> {
     let grid_template_rows: GridTemplateTracks<S, GridTemplateComponent<S>> =
         parse_or_default(xnode.attribute("grid-template-rows"));
     let grid_template_columns: GridTemplateTracks<S, GridTemplateComponent<S>> =
         parse_or_default(xnode.attribute("grid-template-columns"));
+    let flex_direction = parse_or_default(xnode.attribute("flex-direction"));
 
     taffy::Style {
-        flex_main_sizing: Default::default(),
+        flex_main_sizing: block_axis_main_sizing(flex_direction),
         flex_cross_size: taffy::style::FlexCrossSize::Style,
         flex_cross_intrinsic_bounds: taffy::style::FlexCrossIntrinsicBounds::None,
         margin_trim: Default::default(),
@@ -316,7 +326,7 @@ fn build_style<S: CheapCloneStr>(xnode: roxmltree::Node) -> taffy::Style<S> {
         justify_content: maybe_parse(xnode.attribute("justify-content")),
 
         text_align: parse_or_default(xnode.attribute("text-align")),
-        flex_direction: parse_or_default(xnode.attribute("flex-direction")),
+        flex_direction,
         flex_wrap: parse_or_default(xnode.attribute("flex-wrap")),
         flex_line_count: core::num::NonZeroU32::MIN,
         flex_grow: parse_or(xnode.attribute("flex-grow"), 0.0),
