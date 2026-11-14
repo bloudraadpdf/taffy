@@ -21,6 +21,7 @@
 //! | [`round_layout`]                  | [`RoundTree`]                                                                                                                                                                                      | Round a tree of float-valued layouts to integer pixels               |
 //! | [`print_tree`](crate::print_tree) | [`PrintTree`](crate::PrintTree)                                                                                                                                                                    | Print a debug representation of a node tree and it's computed layout |
 //!
+/// The scrollbar gutter on each edge of a node: its resolved gutters, or the gutters of its scrolling axes.
 pub(crate) fn scrollbar_gutters(style: &impl crate::style::CoreStyle) -> crate::geometry::Rect<f32> {
     use crate::geometry::Rect;
     if let Some(gutters) = style.resolved_scrollbar_gutters() {

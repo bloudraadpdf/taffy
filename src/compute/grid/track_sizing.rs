@@ -649,7 +649,8 @@ fn resolve_intrinsic_track_sizes<Tree: LayoutPartialTree>(
                             // Browsers give explicit minimums and scroll-container automatic minimums precedence over
                             // limited min-content contributions.
                             AvailableSpace::MinContent | AvailableSpace::MaxContent
-                                if item.min_size.get(axis).is_auto() && !item.overflow.get(axis).is_scroll_container() =>
+                                if item.min_size.get(axis).is_auto()
+                                    && !item.overflow.get(axis).is_scroll_container() =>
                             {
                                 let axis_minimum_size = item_sizer.minimum_contribution(item, axis_tracks);
                                 let axis_min_content_size = item_sizer.min_content_contribution(item, axis_tracks);
@@ -1174,7 +1175,7 @@ fn distribute_item_space_to_growth_limit(
         tracks,
         &track_is_affected,
         |_| 1.0,
-        &affected_size,
+        affected_size,
         |track| {
             if track.infinitely_growable || track.growth_limit == f32::INFINITY {
                 track.fit_content_limit(axis_inner_node_size)
