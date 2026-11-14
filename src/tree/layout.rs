@@ -62,6 +62,8 @@ pub struct MeasureInput {
     pub inline_percentage_basis: InlinePercentageBasis,
     /// The space available to the node
     pub available_space: Size<AvailableSpace>,
+    /// The axis whose size the caller reads. The size in the other axis is not read.
+    pub axis: RequestedAxis,
 }
 
 /// A set of margins that are available for collapsing with for block layout's margin collapsing

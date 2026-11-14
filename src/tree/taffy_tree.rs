@@ -340,6 +340,7 @@ where
                                 parent_size: inputs.parent_size,
                                 inline_percentage_basis: inputs.inline_percentage_basis,
                                 available_space,
+                                axis: inputs.axis,
                             },
                             node_id,
                             node_context,
@@ -993,6 +994,7 @@ mod tests {
     use crate::geometry::Rect;
     use crate::style::{AlignSelf, Dimension, Display, FlexDirection, GridItemInlineAxis, LengthPercentage};
     use crate::style_helpers::*;
+    use crate::tree::RequestedAxis;
     use crate::util::sys;
     use core::cell::{Cell, RefCell};
 
@@ -1421,6 +1423,16 @@ mod tests {
             input.parent_size.width == Some(100.0)
                 && input.inline_percentage_basis.resolve(input.parent_size) == Some(100.0)
         }));
+    }
+
+    #[test]
+    #[cfg(feature = "grid")]
+    fn grid_measurement_receives_the_axis_of_each_track_sizing_pass() {
+        let observations = grid_measurement_inputs(Style::default());
+
+        for axis in [RequestedAxis::Horizontal, RequestedAxis::Vertical] {
+            assert!(observations.iter().any(|input| input.axis == axis), "{axis:?}");
+        }
     }
 
     #[test]
